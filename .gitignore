@@ -1,0 +1,35 @@
+# -------------------------------------------------------------------------
+# 1. ENVIRONMENT/SECRETS (MOST IMPORTANT FOR YOU)
+# -------------------------------------------------------------------------
+# Local environment variable file (Contains DB passwords, API keys, etc.)
+.env
+
+# -------------------------------------------------------------------------
+# 2. VIRTUAL ENVIRONMENT
+# -------------------------------------------------------------------------
+# Virtual environment directory (DO NOT commit your venv)
+venv/
+.venv/
+env/
+
+# -------------------------------------------------------------------------
+# 3. PYTHON ARTIFACTS
+# -------------------------------------------------------------------------
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+*$py.class
+
+# IDE-specific files (e.g., PyCharm, VS Code workspace settings)
+.idea/
+.vscode/
+
+# Build and testing artifacts
+dist/
+build/
+*.egg-info/
+htmlcov/
+.coverage
+
+# Logs and Debug
+*.log
