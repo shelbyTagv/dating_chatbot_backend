@@ -37,10 +37,6 @@ WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 # -------------------------------------------------
 @app.on_event("startup")
 def startup_event():
-    """
-    Runs automatically when Railway container starts.
-    Ensures MySQL tables exist.
-    """
     try:
         db_manager.init_db()
         print("✅ Database initialized successfully")
@@ -89,20 +85,14 @@ async def verify_webhook(request: Request):
 # -------------------------------------------------
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
-    headers = dict(request.headers)
-    print("Incoming headers:", headers)  # Log all headers
-    payload = await request.json()
-    print("Payload received:", payload)
-    return JSONResponse(content={"status": "Debug headers logged"}, status_code=200)
-
-
-
-
-
     auth_header = request.headers.get("Authorization")
 
-    if GREEN_API_AUTH_TOKEN and auth_header != GREEN_API_AUTH_TOKEN:
-        raise HTTPException(status_code=401, detail="Unauthorized")
+    # --- FIX: Strip 'Bearer ' before comparison
+    if GREEN_API_AUTH_TOKEN:
+        token_received = auth_header.replace("Bearer ", "") if auth_header else None
+        if token_received != GREEN_API_AUTH_TOKEN:
+            print("❌ Unauthorized webhook attempt:", auth_header)
+            raise HTTPException(status_code=401, detail="Unauthorized webhook")
 
     payload = await request.json()
 
@@ -110,11 +100,17 @@ async def whatsapp_webhook(request: Request):
         return JSONResponse({"status": "ignored"}, status_code=200)
 
     sender = payload.get("senderData", {})
-    message = payload.get("messageData", {}).get("textMessageData", {})
+    message_data = payload.get("messageData", {})
 
     raw_chat_id = sender.get("chatId", "")
     phone = raw_chat_id.split("@")[0]
-    text = message.get("textMessage", "").strip()
+
+    # --- FIX: Handle both textMessageData and extendedTextMessageData
+    text = ""
+    if "textMessageData" in message_data:
+        text = message_data["textMessageData"].get("textMessage", "").strip()
+    elif "extendedTextMessageData" in message_data:
+        text = message_data["extendedTextMessageData"].get("text", "").strip()
 
     if not phone or not text:
         return JSONResponse({"status": "no-text"}, status_code=200)
