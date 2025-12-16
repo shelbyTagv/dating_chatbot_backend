@@ -42,7 +42,7 @@ def init_db():
     conn = get_conn()
     cur = conn.cursor()
     try:
-        # Drop existing tables to ensure clean schema
+        # Drop tables to ensure clean schema
         cur.execute("DROP TABLE IF EXISTS transactions")
         cur.execute("DROP TABLE IF EXISTS profiles")
         cur.execute("DROP TABLE IF EXISTS users")
@@ -68,8 +68,11 @@ def init_db():
             age INT,
             gender VARCHAR(20),
             location VARCHAR(100),
-            relationship_type VARCHAR(50),
+            relationship_type TEXT,
             preferred_person TEXT,
+            age_min INT,
+            age_max INT,
+            radius_km INT DEFAULT 10,
             contact_phone VARCHAR(20),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
@@ -140,12 +143,9 @@ def reset_user(user_id):
 # PROFILES
 # -------------------------------------------------
 ALLOWED_PROFILE_FIELDS = {
-    "name",
-    "age",
-    "gender",
-    "location",
-    "relationship_type",
-    "preferred_person",
+    "name", "age", "gender", "location",
+    "relationship_type", "preferred_person",
+    "age_min", "age_max", "radius_km",
     "contact_phone",
 }
 
@@ -216,45 +216,53 @@ def unlock_full_profiles(user_id):
     conn.close()
 
 # -------------------------------------------------
-# AI MATCH PREVIEW (GPT-style filtering)
+# AI MATCH PREVIEW (age + gender + radius)
 # -------------------------------------------------
 def ai_match_preview(user_id):
-    """
-    Returns matches based on:
-    - Age range (±5 years)
-    - Gender preference
-    - Relationship type
-    - Same location
-    """
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
-    # Get current user's profile
+    # Current user profile
     cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
     user_profile = cur.fetchone()
     if not user_profile:
         return []
 
-    # Basic matching logic
-    age_min = user_profile["age"] - 5 if user_profile["age"] else 0
-    age_max = user_profile["age"] + 5 if user_profile["age"] else 100
-    relationship = user_profile["relationship_type"]
+    age_min = user_profile.get("age_min") or (user_profile["age"] - 5)
+    age_max = user_profile.get("age_max") or (user_profile["age"] + 5)
+    preferred_gender = user_profile.get("preferred_person", "").lower()
+    relationship_types = user_profile.get("relationship_type", "").split(",")
     location = user_profile["location"]
+    radius_km = user_profile.get("radius_km", 10)
 
-    cur.execute("""
-        SELECT *
-        FROM profiles P
-        JOIN users U ON U.id = P.user_id
-        WHERE
-            U.id != %s
-            AND U.is_active = 1
-            AND P.age BETWEEN %s AND %s
-            AND P.relationship_type = %s
-            AND P.location = %s
-        LIMIT 5
-    """, (user_id, age_min, age_max, relationship, location))
-
-    results = cur.fetchall()
-    cur.close()
+    # Basic filtering by age, gender, relationship type
+    cur.execute("SELECT P.*, U.is_active FROM profiles P JOIN users U ON U.id = P.user_id WHERE U.id != %s AND U.is_active=1", (user_id,))
+    candidates = cur.fetchall()
     conn.close()
-    return results
+
+    def distance_within_radius(loc1, loc2, radius_km):
+        # Simple placeholder: exact city match counts as within radius
+        return loc1.lower() == loc2.lower()
+
+    def score(match):
+        score = 0
+        # Age closeness
+        if match.get("age"):
+            score += max(0, 10 - abs(user_profile["age"] - match["age"]))
+        # Gender preference
+        if preferred_gender and match.get("gender", "").lower() == preferred_gender:
+            score += 5
+        # Relationship type match
+        if match.get("relationship_type") in relationship_types:
+            score += 3
+        # Location proximity
+        if distance_within_radius(location, match.get("location", ""), radius_km):
+            score += 2
+        return score
+
+    ranked = sorted(
+        [m for m in candidates if age_min <= m.get("age", 0) <= age_max],
+        key=score,
+        reverse=True
+    )
+    return ranked[:5]

@@ -52,7 +52,10 @@ def startup_event():
 def send_whatsapp_message(to_chat_id: str, message_text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {"chatId": f"{to_chat_id}@c.us", "message": message_text}
-    requests.post(url, json=payload, timeout=10)
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print(f"Failed to send message: {e}")
 
 # -------------------------------------------------
 # WEBHOOK VERIFY
@@ -113,10 +116,7 @@ def handle_message(phone: str, text: str) -> str:
 
     if state == "NEW":
         db_manager.update_chat_state(uid, "AWAITING_HELLO")
-        return (
-            "👋 Welcome to Shelby's Match-making! Type HELLO to start.\n"
-            "Privacy: your data is safe and only shared after payment."
-        )
+        return "👋 Welcome! Type HELLO to start. Your data is safe."
 
     if state == "AWAITING_HELLO":
         if text_clean != "hello":
@@ -144,19 +144,39 @@ def handle_message(phone: str, text: str) -> str:
     if state == "GET_LOCATION":
         db_manager.update_profile_field(uid, "location", text)
         db_manager.update_chat_state(uid, "GET_RELATIONSHIP_TYPE")
-        return "Preferred relationship type:\n" + "\n".join(f"- {r}" for r in RELATIONSHIP_TYPES)
+        return "Choose relationship type(s), separate multiple with commas:\n" + "\n".join(f"- {r}" for r in RELATIONSHIP_TYPES)
 
     if state == "GET_RELATIONSHIP_TYPE":
-        if text.capitalize() not in RELATIONSHIP_TYPES:
-            return "Please choose one of the listed options."
-        db_manager.update_profile_field(uid, "relationship_type", text.capitalize())
+        types = [t.strip() for t in text.split(",") if t.strip() in RELATIONSHIP_TYPES]
+        if not types:
+            return "Please choose at least one valid relationship type."
+        db_manager.update_profile_field(uid, "relationship_type", ",".join(types))
         db_manager.update_chat_state(uid, "GET_PREFERRED_PERSON")
-        return "Describe your preferred type of person."
+        return "Preferred gender of match? (Male / Female / Any)"
 
     if state == "GET_PREFERRED_PERSON":
         db_manager.update_profile_field(uid, "preferred_person", text)
+        db_manager.update_chat_state(uid, "GET_AGE_RANGE")
+        return "Enter preferred age range (e.g., 25-35):"
+
+    if state == "GET_AGE_RANGE":
+        try:
+            min_age, max_age = map(int, text.split("-"))
+        except Exception:
+            return "Please enter a valid range like 25-35."
+        db_manager.update_profile_field(uid, "age_min", min_age)
+        db_manager.update_profile_field(uid, "age_max", max_age)
+        db_manager.update_chat_state(uid, "GET_RADIUS")
+        return "Enter location radius in km (e.g., 10):"
+
+    if state == "GET_RADIUS":
+        try:
+            radius = int(text)
+        except Exception:
+            return "Please enter a valid number for radius."
+        db_manager.update_profile_field(uid, "radius_km", radius)
         db_manager.update_chat_state(uid, "GET_PHONE")
-        return "Please enter your phone number."
+        return "Finally, enter your phone number:"
 
     if state == "GET_PHONE":
         db_manager.update_profile_field(uid, "contact_phone", text)
@@ -221,7 +241,7 @@ async def paynow_ipn(request: Request):
     data = await request.form()
     reference = data.get("reference")
     status = data.get("status")
-    if status == "Paid":
+    if status and status.lower() == "paid":
         tx = db_manager.get_transaction_by_reference(reference)
         if tx:
             db_manager.mark_transaction_paid(tx["id"])
