@@ -9,7 +9,7 @@ load_dotenv()
 _connection_pool = None
 
 # -------------------------------------------------
-# CONNECTION POOL (LAZY LOAD)
+# CONNECTION POOL
 # -------------------------------------------------
 def get_db_pool():
     global _connection_pool
@@ -37,7 +37,7 @@ def get_conn():
     return get_db_pool().get_connection()
 
 # -------------------------------------------------
-# DB INITIALIZATION (AUTO-RUN ON STARTUP)
+# INIT DB
 # -------------------------------------------------
 def init_db():
     conn = get_conn()
@@ -48,7 +48,7 @@ def init_db():
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone_number VARCHAR(20) UNIQUE NOT NULL,
-            chat_state VARCHAR(50) DEFAULT 'START',
+            chat_state VARCHAR(50) DEFAULT 'NEW',
             is_active BOOLEAN DEFAULT 0,
             subscription_expiry DATETIME NULL,
             created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
@@ -63,7 +63,9 @@ def init_db():
             age INT,
             gender VARCHAR(20),
             location VARCHAR(100),
-            motive VARCHAR(50),
+            relationship_type VARCHAR(50),
+            preferred_person TEXT,
+            contact_phone VARCHAR(20),
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
         """)
@@ -95,7 +97,7 @@ def get_or_create_user(phone):
 
     try:
         cur.execute(
-            "SELECT id, phone_number, chat_state, is_active FROM users WHERE phone_number=%s",
+            "SELECT * FROM users WHERE phone_number=%s",
             (phone,),
         )
         user = cur.fetchone()
@@ -108,11 +110,10 @@ def get_or_create_user(phone):
             conn.commit()
 
             cur.execute(
-                "SELECT id, phone_number, chat_state, is_active FROM users WHERE phone_number=%s",
+                "SELECT * FROM users WHERE phone_number=%s",
                 (phone,),
             )
             user = cur.fetchone()
-
     finally:
         cur.close()
         conn.close()
@@ -123,36 +124,49 @@ def get_or_create_user(phone):
 def update_chat_state(user_id, state):
     conn = get_conn()
     cur = conn.cursor()
+    cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
 
-    try:
-        cur.execute(
-            "UPDATE users SET chat_state=%s WHERE id=%s",
-            (state, user_id),
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+
+def reset_user(user_id):
+    conn = get_conn()
+    cur = conn.cursor()
+
+    cur.execute("DELETE FROM profiles WHERE user_id=%s", (user_id,))
+    cur.execute("""
+        UPDATE users
+        SET chat_state='NEW',
+            is_active=0,
+            subscription_expiry=NULL
+        WHERE id=%s
+    """, (user_id,))
+
+    conn.commit()
+    cur.close()
+    conn.close()
 
 # -------------------------------------------------
 # PROFILES
 # -------------------------------------------------
-ALLOWED_PROFILE_FIELDS = {"name", "age", "gender", "location", "motive"}
-
+ALLOWED_PROFILE_FIELDS = {
+    "name",
+    "age",
+    "gender",
+    "location",
+    "relationship_type",
+    "preferred_person",
+    "contact_phone",
+}
 
 def ensure_profile(user_id):
     conn = get_conn()
     cur = conn.cursor()
-
-    try:
-        cur.execute(
-            "INSERT IGNORE INTO profiles (user_id) VALUES (%s)",
-            (user_id,),
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("INSERT IGNORE INTO profiles (user_id) VALUES (%s)", (user_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def update_profile_field(user_id, field, value):
@@ -163,31 +177,10 @@ def update_profile_field(user_id, field, value):
 
     conn = get_conn()
     cur = conn.cursor()
-
-    try:
-        cur.execute(
-            f"UPDATE profiles SET {field}=%s WHERE user_id=%s",
-            (value, user_id),
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
-
-
-def get_user_profile(user_id):
-    conn = get_conn()
-    cur = conn.cursor(dictionary=True)
-
-    try:
-        cur.execute(
-            "SELECT * FROM profiles WHERE user_id=%s",
-            (user_id,),
-        )
-        return cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 # -------------------------------------------------
 # PAYMENTS
@@ -195,101 +188,72 @@ def get_user_profile(user_id):
 def create_transaction(user_id, reference, poll_url, amount):
     conn = get_conn()
     cur = conn.cursor()
-
-    try:
-        cur.execute(
-            """
-            INSERT INTO transactions
-            (user_id, paynow_reference, poll_url, amount, status)
-            VALUES (%s,%s,%s,%s,'PENDING')
-            """,
-            (user_id, reference, poll_url, amount),
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("""
+        INSERT INTO transactions
+        (user_id, paynow_reference, poll_url, amount, status)
+        VALUES (%s,%s,%s,%s,'PENDING')
+    """, (user_id, reference, poll_url, amount))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
 def get_transaction_by_reference(reference):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-
-    try:
-        cur.execute(
-            "SELECT * FROM transactions WHERE paynow_reference=%s LIMIT 1",
-            (reference,),
-        )
-        return cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("SELECT * FROM transactions WHERE paynow_reference=%s", (reference,))
+    tx = cur.fetchone()
+    cur.close()
+    conn.close()
+    return tx
 
 
 def mark_transaction_paid(tx_id):
     conn = get_conn()
     cur = conn.cursor()
-
-    try:
-        cur.execute(
-            "UPDATE transactions SET status='PAID' WHERE id=%s",
-            (tx_id,),
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("UPDATE transactions SET status='PAID' WHERE id=%s", (tx_id,))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 
-def activate_subscription(user_id):
-    expiry = datetime.utcnow() + timedelta(days=30)
+def unlock_full_profiles(user_id):
+    expiry = datetime.utcnow() + timedelta(days=1)
 
     conn = get_conn()
     cur = conn.cursor()
-
-    try:
-        cur.execute(
-            """
-            UPDATE users
-            SET is_active=1,
-                subscription_expiry=%s,
-                chat_state='ACTIVE_SEARCH'
-            WHERE id=%s
-            """,
-            (expiry, user_id),
-        )
-        conn.commit()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("""
+        UPDATE users
+        SET is_active=1,
+            subscription_expiry=%s,
+            chat_state='ACTIVE'
+        WHERE id=%s
+    """, (expiry, user_id))
+    conn.commit()
+    cur.close()
+    conn.close()
 
 # -------------------------------------------------
-# MATCHING (SAFE VERSION)
+# AI MATCH PREVIEW (NO CONTACT DETAILS)
 # -------------------------------------------------
-def find_potential_matches(user_id, location):
+def ai_match_preview(user_id):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
-    try:
-        cur.execute(
-            """
-            SELECT
-                U.id AS match_user_id,
-                P.name AS match_name,
-                P.age AS match_age,
-                P.motive AS match_motive,
-                U.phone_number AS match_phone
-            FROM users U
-            JOIN profiles P ON U.id = P.user_id
-            WHERE
-                U.is_active = 1
-                AND U.id != %s
-                AND P.location = %s
-            LIMIT 1
-            """,
-            (user_id, location),
-        )
-        return cur.fetchone()
-    finally:
-        cur.close()
-        conn.close()
+    cur.execute("""
+        SELECT
+            P.name,
+            P.location,
+            P.relationship_type
+        FROM profiles P
+        JOIN users U ON U.id = P.user_id
+        WHERE
+            U.id != %s
+            AND U.is_active = 1
+        LIMIT 5
+    """, (user_id,))
+
+    results = cur.fetchall()
+    cur.close()
+    conn.close()
+    return results

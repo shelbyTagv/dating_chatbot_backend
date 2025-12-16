@@ -5,7 +5,6 @@ import os
 import time
 import hashlib
 import requests
-import json
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -32,42 +31,37 @@ GREEN_API_URL = "https://api.greenapi.com"
 
 WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
+PAYMENT_AMOUNT = "2.00"
+
+RELATIONSHIP_TYPES = [
+    "Friends",
+    "Sugar mummy",
+    "Sugar daddy",
+    "Soulmate",
+    "One night stand",
+    "Money deals"
+]
+
 # -------------------------------------------------
-# STARTUP: AUTO-CREATE TABLES
+# STARTUP
 # -------------------------------------------------
 @app.on_event("startup")
 def startup_event():
-    try:
-        db_manager.init_db()
-        print("✅ Database initialized successfully")
-    except Exception as e:
-        print(f"❌ Database initialization failed: {e}")
-        raise e
+    db_manager.init_db()
 
 # -------------------------------------------------
-# GREEN API SEND MESSAGE
+# SEND WHATSAPP MESSAGE
 # -------------------------------------------------
 def send_whatsapp_message(to_chat_id: str, message_text: str):
-    if not ID_INSTANCE or not API_TOKEN_INSTANCE:
-        print("❌ Green API credentials missing")
-        return None
-
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {
         "chatId": f"{to_chat_id}@c.us",
         "message": message_text
     }
-
-    try:
-        res = requests.post(url, json=payload, timeout=10)
-        res.raise_for_status()
-        return res.json()
-    except Exception as e:
-        print(f"❌ Green API send error: {e}")
-        return None
+    requests.post(url, json=payload, timeout=10)
 
 # -------------------------------------------------
-# WEBHOOK VERIFICATION
+# WEBHOOK VERIFY
 # -------------------------------------------------
 @app.get("/webhook")
 async def verify_webhook(request: Request):
@@ -76,28 +70,24 @@ async def verify_webhook(request: Request):
     challenge = request.query_params.get("hub.challenge")
 
     if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
-        return PlainTextResponse(challenge, status_code=200)
+        return PlainTextResponse(challenge)
 
-    raise HTTPException(status_code=403, detail="Verification failed")
+    raise HTTPException(status_code=403)
 
 # -------------------------------------------------
-# INCOMING MESSAGES
+# INCOMING WEBHOOK
 # -------------------------------------------------
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     auth_header = request.headers.get("Authorization")
-
-    # --- FIX: Strip 'Bearer ' before comparison
     if GREEN_API_AUTH_TOKEN:
-        token_received = auth_header.replace("Bearer ", "") if auth_header else None
-        if token_received != GREEN_API_AUTH_TOKEN:
-            print("❌ Unauthorized webhook attempt:", auth_header)
-            raise HTTPException(status_code=401, detail="Unauthorized webhook")
+        if not auth_header or auth_header.replace("Bearer ", "") != GREEN_API_AUTH_TOKEN:
+            raise HTTPException(status_code=401)
 
     payload = await request.json()
 
     if payload.get("typeWebhook") != "incomingMessageReceived":
-        return JSONResponse({"status": "ignored"}, status_code=200)
+        return JSONResponse({"status": "ignored"})
 
     sender = payload.get("senderData", {})
     message_data = payload.get("messageData", {})
@@ -105,7 +95,6 @@ async def whatsapp_webhook(request: Request):
     raw_chat_id = sender.get("chatId", "")
     phone = raw_chat_id.split("@")[0]
 
-    # --- FIX: Handle both textMessageData and extendedTextMessageData
     text = ""
     if "textMessageData" in message_data:
         text = message_data["textMessageData"].get("textMessage", "").strip()
@@ -113,24 +102,48 @@ async def whatsapp_webhook(request: Request):
         text = message_data["extendedTextMessageData"].get("text", "").strip()
 
     if not phone or not text:
-        return JSONResponse({"status": "no-text"}, status_code=200)
+        return JSONResponse({"status": "no-text"})
 
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
 
-    return JSONResponse({"status": "processed"}, status_code=200)
+    return JSONResponse({"status": "processed"})
 
 # -------------------------------------------------
 # CHAT LOGIC
 # -------------------------------------------------
 def handle_message(phone: str, text: str) -> str:
+    text_clean = text.strip().lower()
     user = db_manager.get_or_create_user(phone)
     uid = user["id"]
     state = user["chat_state"]
 
-    if state == "START":
+    # EXIT anytime
+    if text_clean == "exit":
+        db_manager.reset_user(uid)
+        return "❌ Conversation ended. Type HELLO to start again."
+
+    # First contact
+    if state == "NEW":
+        db_manager.update_chat_state(uid, "AWAITING_HELLO")
+        return (
+            "👋 Welcome to our matchmaking service.\n\n"
+            "🔐 Privacy Policy:\n"
+            "Your data is confidential and only shared after payment consent.\n\n"
+            "📌 How it works:\n"
+            "1. You answer a few questions\n"
+            "2. We find matches near you\n"
+            "3. You pay $2 to unlock full profiles\n\n"
+            "💳 Payment: EcoCash via Paynow\n\n"
+            "➡️ Type HELLO to begin\n"
+            "➡️ Type EXIT anytime to cancel"
+        )
+
+    if state == "AWAITING_HELLO":
+        if text_clean != "hello":
+            return "Please type HELLO to start or EXIT to cancel."
         db_manager.update_chat_state(uid, "GET_NAME")
-        return "Welcome ❤️ What is your name?"
+        return "What is your name?"
 
     if state == "GET_NAME":
         db_manager.update_profile_field(uid, "name", text)
@@ -145,98 +158,94 @@ def handle_message(phone: str, text: str) -> str:
         return "Gender? (Male / Female / Other)"
 
     if state == "GET_GENDER":
-        if text.capitalize() not in ["Male", "Female", "Other"]:
-            return "Please enter Male, Female, or Other."
         db_manager.update_profile_field(uid, "gender", text.capitalize())
         db_manager.update_chat_state(uid, "GET_LOCATION")
         return "Which city are you in?"
 
     if state == "GET_LOCATION":
         db_manager.update_profile_field(uid, "location", text)
-        db_manager.update_chat_state(uid, "GET_MOTIVE")
-        return "What are you looking for? (Soulmate / Casual / Sugar)"
+        db_manager.update_chat_state(uid, "GET_RELATIONSHIP_TYPE")
+        return (
+            "Preferred relationship type:\n" +
+            "\n".join(f"- {r}" for r in RELATIONSHIP_TYPES)
+        )
 
-    if state == "GET_MOTIVE":
-        if text.capitalize() not in ["Soulmate", "Casual", "Sugar"]:
-            return "Please enter Soulmate, Casual, or Sugar."
-        db_manager.update_profile_field(uid, "motive", text.capitalize())
-        db_manager.update_chat_state(uid, "AWAITING_PAYMENT")
-        return initiate_payment(uid)
+    if state == "GET_RELATIONSHIP_TYPE":
+        if text.capitalize() not in RELATIONSHIP_TYPES:
+            return "Please choose one of the listed options."
+        db_manager.update_profile_field(uid, "relationship_type", text.capitalize())
+        db_manager.update_chat_state(uid, "GET_PREFERRED_PERSON")
+        return "Describe your preferred type of person."
+
+    if state == "GET_PREFERRED_PERSON":
+        db_manager.update_profile_field(uid, "preferred_person", text)
+        db_manager.update_chat_state(uid, "GET_PHONE")
+        return "Please enter your phone number."
+
+    if state == "GET_PHONE":
+        db_manager.update_profile_field(uid, "contact_phone", text)
+        db_manager.update_chat_state(uid, "PREVIEW_MATCHES")
+        return preview_matches(uid)
 
     if state == "AWAITING_PAYMENT":
-        return "💰 Please complete your EcoCash payment to continue."
+        return "💳 Please complete the $2 payment to unlock full profiles."
 
-    if state == "ACTIVE_SEARCH":
-        profile = db_manager.get_user_profile(uid)
-        match = db_manager.find_potential_matches(uid, profile["location"])
-
-        if match:
-            return (
-                "🔥 Match Found!\n"
-                f"Name: {match['match_name']}\n"
-                f"Age: {match['match_age']}\n"
-                f"Motive: {match['match_motive']}\n"
-                f"Contact: +{match['match_phone']}"
-            )
-
-        return "No matches yet. Please try again later."
-
-    return "Please restart the chat."
+    return "Type EXIT to restart."
 
 # -------------------------------------------------
-# PAYNOW PAYMENT
+# AI MATCH PREVIEW (NO CONTACT DETAILS)
+# -------------------------------------------------
+def preview_matches(user_id: int) -> str:
+    matches = db_manager.ai_match_preview(user_id)
+
+    if not matches:
+        db_manager.reset_user(user_id)
+        return "No matches found. Type HELLO to try again."
+
+    msg = "🔥 Potential Matches Found:\n\n"
+    for m in matches:
+        msg += f"- {m['name']} ({m['location']}) — {m['relationship_type']}\n"
+
+    msg += "\n💳 Pay $2 to unlock full profiles."
+    db_manager.update_chat_state(user_id, "AWAITING_PAYMENT")
+    msg += "\n\n" + initiate_payment(user_id)
+
+    return msg
+
+# -------------------------------------------------
+# PAYNOW INIT
 # -------------------------------------------------
 def initiate_payment(user_id: int) -> str:
-    reference = f"SUB-{user_id}-{int(time.time())}"
-    amount = "5.00"
+    reference = f"PAY-{user_id}-{int(time.time())}"
 
-    # PAYNOW HASH (ORDER MATTERS)
     auth_string = (
-        f"{PAYNOW_ID}"
-        f"{reference}"
-        f"{amount}"
-        f"Dating subscription"
-        f"{BASE_URL}/paid"
-        f"{BASE_URL}/paynow/ipn"
-        f"Message"
-        f"{PAYNOW_KEY}"
+        f"{PAYNOW_ID}{reference}{PAYMENT_AMOUNT}"
+        f"Match Unlock{BASE_URL}/paid{BASE_URL}/paynow/ipn"
+        f"Message{PAYNOW_KEY}"
     )
 
-    hash_val = hashlib.sha512(auth_string.encode("utf-8")).hexdigest().upper()
+    hash_val = hashlib.sha512(auth_string.encode()).hexdigest().upper()
 
     payload = {
         "id": PAYNOW_ID,
         "reference": reference,
-        "amount": amount,
-        "additionalinfo": "Dating subscription",
+        "amount": PAYMENT_AMOUNT,
+        "additionalinfo": "Match Unlock",
         "returnurl": f"{BASE_URL}/paid",
         "resulturl": f"{BASE_URL}/paynow/ipn",
         "status": "Message",
-        "hash": hash_val,
+        "hash": hash_val
     }
 
-    try:
-        res = requests.post(PAYNOW_INIT_URL, data=payload, timeout=15)
-    except Exception:
-        return "❌ Payment service unreachable."
-
-    # DEBUG (important)
-    print("PAYNOW RESPONSE:", res.text)
-
+    res = requests.post(PAYNOW_INIT_URL, data=payload, timeout=15)
     if "pollurl=" not in res.text.lower():
-        return (
-            "❌ Payment initialization failed.\n"
-            "Please try again later or contact support."
-        )
+        db_manager.reset_user(user_id)
+        return "❌ Payment failed. Type HELLO to start again."
 
     poll_url = res.text.split("pollurl=")[-1].strip()
-    db_manager.create_transaction(user_id, reference, poll_url, amount)
+    db_manager.create_transaction(user_id, reference, poll_url, PAYMENT_AMOUNT)
 
-    return (
-        "💰 Subscription payment required\n\n"
-        f"Click here to pay:\n{poll_url}\n\n"
-        "After payment, you will be activated automatically."
-    )
+    return f"\n👉 Pay here:\n{poll_url}"
 
 # -------------------------------------------------
 # PAYNOW IPN
@@ -251,18 +260,6 @@ async def paynow_ipn(request: Request):
         tx = db_manager.get_transaction_by_reference(reference)
         if tx:
             db_manager.mark_transaction_paid(tx["id"])
-            db_manager.activate_subscription(tx["user_id"])
+            db_manager.unlock_full_profiles(tx["user_id"])
 
-    return PlainTextResponse("OK", status_code=200)
-
-# -------------------------------------------------
-# LOCAL DEV ONLY
-# -------------------------------------------------
-if __name__ == "__main__":
-    import uvicorn
-    uvicorn.run(
-        "app:app",
-        host="0.0.0.0",
-        port=int(os.getenv("PORT", 8080)),
-        reload=True,
-    )
+    return PlainTextResponse("OK")
