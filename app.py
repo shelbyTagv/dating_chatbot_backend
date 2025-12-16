@@ -114,7 +114,7 @@ def handle_message(phone: str, text: str) -> str:
     if state == "NEW":
         db_manager.update_chat_state(uid, "AWAITING_HELLO")
         return (
-            "👋 Welcome! Type HELLO to start.\n"
+            "👋 Welcome to Shelby's Match-making! Type HELLO to start.\n"
             "Privacy: your data is safe and only shared after payment."
         )
 
