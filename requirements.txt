@@ -1,44 +1,30 @@
-# Core backend
 fastapi==0.122.0
 uvicorn==0.38.0
 requests==2.32.5
 python-dotenv==1.2.1
 
-# Django stack (keep only if you are actually using Django)
-Django==5.2.8
-django-cors-headers==4.9.0
-djangorestframework==3.16.1
-djangorestframework_simplejwt==5.5.1
-
-# Async / networking
 anyio==4.11.0
 httpx==0.28.1
 h11==0.16.0
 sniffio==1.3.1
 starlette==0.50.0
 
-# Data & utilities
 pandas==2.3.3
 numpy==2.1.2
 python-dateutil==2.9.0.post0
 pytz==2022.1
 tzdata==2025.2
 
-# NLP / AI
 spacy==3.8.11
 en_core_web_sm @ https://github.com/explosion/spacy-models/releases/download/en_core_web_sm-3.8.0/en_core_web_sm-3.8.0-py3-none-any.whl
 openai==2.11.0
 
-# Security / auth
 cryptography==46.0.3
 PyJWT==2.3.0
 bcrypt==3.2.0
 argon2-cffi==25.1.0
 
-# Serialization / parsing
 pydantic==2.12.4
 pydantic_core==2.41.5
-PyYAML==5.4.1
 
-# Optional: PDF generation (keep only if used)
-reportlab==3.6.8
+PyYAML>=6.0

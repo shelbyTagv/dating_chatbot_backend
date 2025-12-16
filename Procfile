@@ -1,2 +1,1 @@
-web: gunicorn app:app
-worker: python poller.py
+web: uvicorn app:app --host 0.0.0.0 --port $PORT
