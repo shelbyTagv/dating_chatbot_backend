@@ -24,9 +24,9 @@ def get_db_pool():
         
         # NOTE: Using standard environment variable names (MYSQL_HOST, not MYSQLHOST)
         dbconfig = {
-            "host": os.getenv("MYSQL_HOST"),      
-            "user": os.getenv("MYSQL_USER"),      
-            "password": os.getenv("MYSQL_PASSWORD"), 
+            "host": os.getenv("MYSQLHOST"),      
+            "user": os.getenv("MYSQLUSER"),      
+            "password": os.getenv("MYSQLPASSWORD"), 
             "database": os.getenv("MYSQL_DATABASE"), 
             # Convert port to int, defaulting to 3306 if MYSQL_PORT is not set
             "port": int(os.getenv("MYSQL_PORT", 3306)) 
