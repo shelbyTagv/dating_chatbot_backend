@@ -25,7 +25,7 @@ BASE_URL = os.getenv("BASE_URL")
 # Define the verification token here, read from environment variables
 WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
-
+#Remove comment later 
 # -------------------------------------------------
 # WhatsApp Webhook - VERIFICATION (The FIX)
 # -------------------------------------------------
