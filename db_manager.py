@@ -32,7 +32,6 @@ def get_db_pool():
 
     return _connection_pool
 
-
 def get_conn():
     return get_db_pool().get_connection()
 
@@ -42,10 +41,15 @@ def get_conn():
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
-
     try:
+        # Drop existing tables to ensure clean schema
+        cur.execute("DROP TABLE IF EXISTS transactions")
+        cur.execute("DROP TABLE IF EXISTS profiles")
+        cur.execute("DROP TABLE IF EXISTS users")
+
+        # Users table
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone_number VARCHAR(20) UNIQUE NOT NULL,
             chat_state VARCHAR(50) DEFAULT 'NEW',
@@ -55,8 +59,9 @@ def init_db():
         )
         """)
 
+        # Profiles table
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
+        CREATE TABLE profiles (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT UNIQUE NOT NULL,
             name VARCHAR(100),
@@ -70,8 +75,9 @@ def init_db():
         )
         """)
 
+        # Transactions table
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
+        CREATE TABLE transactions (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
             paynow_reference VARCHAR(100) UNIQUE,
@@ -94,32 +100,18 @@ def init_db():
 def get_or_create_user(phone):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-
     try:
-        cur.execute(
-            "SELECT * FROM users WHERE phone_number=%s",
-            (phone,),
-        )
+        cur.execute("SELECT * FROM users WHERE phone_number=%s", (phone,))
         user = cur.fetchone()
-
         if not user:
-            cur.execute(
-                "INSERT INTO users (phone_number) VALUES (%s)",
-                (phone,),
-            )
+            cur.execute("INSERT INTO users (phone_number) VALUES (%s)", (phone,))
             conn.commit()
-
-            cur.execute(
-                "SELECT * FROM users WHERE phone_number=%s",
-                (phone,),
-            )
+            cur.execute("SELECT * FROM users WHERE phone_number=%s", (phone,))
             user = cur.fetchone()
     finally:
         cur.close()
         conn.close()
-
     return user
-
 
 def update_chat_state(user_id, state):
     conn = get_conn()
@@ -129,11 +121,9 @@ def update_chat_state(user_id, state):
     cur.close()
     conn.close()
 
-
 def reset_user(user_id):
     conn = get_conn()
     cur = conn.cursor()
-
     cur.execute("DELETE FROM profiles WHERE user_id=%s", (user_id,))
     cur.execute("""
         UPDATE users
@@ -142,7 +132,6 @@ def reset_user(user_id):
             subscription_expiry=NULL
         WHERE id=%s
     """, (user_id,))
-
     conn.commit()
     cur.close()
     conn.close()
@@ -168,13 +157,10 @@ def ensure_profile(user_id):
     cur.close()
     conn.close()
 
-
 def update_profile_field(user_id, field, value):
     if field not in ALLOWED_PROFILE_FIELDS:
         raise ValueError("Invalid profile field")
-
     ensure_profile(user_id)
-
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, user_id))
@@ -197,7 +183,6 @@ def create_transaction(user_id, reference, poll_url, amount):
     cur.close()
     conn.close()
 
-
 def get_transaction_by_reference(reference):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -207,7 +192,6 @@ def get_transaction_by_reference(reference):
     conn.close()
     return tx
 
-
 def mark_transaction_paid(tx_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -216,10 +200,8 @@ def mark_transaction_paid(tx_id):
     cur.close()
     conn.close()
 
-
 def unlock_full_profiles(user_id):
     expiry = datetime.utcnow() + timedelta(days=1)
-
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -234,24 +216,43 @@ def unlock_full_profiles(user_id):
     conn.close()
 
 # -------------------------------------------------
-# AI MATCH PREVIEW (NO CONTACT DETAILS)
+# AI MATCH PREVIEW (GPT-style filtering)
 # -------------------------------------------------
 def ai_match_preview(user_id):
+    """
+    Returns matches based on:
+    - Age range (±5 years)
+    - Gender preference
+    - Relationship type
+    - Same location
+    """
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
 
+    # Get current user's profile
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
+    user_profile = cur.fetchone()
+    if not user_profile:
+        return []
+
+    # Basic matching logic
+    age_min = user_profile["age"] - 5 if user_profile["age"] else 0
+    age_max = user_profile["age"] + 5 if user_profile["age"] else 100
+    relationship = user_profile["relationship_type"]
+    location = user_profile["location"]
+
     cur.execute("""
-        SELECT
-            P.name,
-            P.location,
-            P.relationship_type
+        SELECT *
         FROM profiles P
         JOIN users U ON U.id = P.user_id
         WHERE
             U.id != %s
             AND U.is_active = 1
+            AND P.age BETWEEN %s AND %s
+            AND P.relationship_type = %s
+            AND P.location = %s
         LIMIT 5
-    """, (user_id,))
+    """, (user_id, age_min, age_max, relationship, location))
 
     results = cur.fetchall()
     cur.close()

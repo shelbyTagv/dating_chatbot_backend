@@ -5,10 +5,8 @@ import os
 import time
 import hashlib
 import requests
-
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
-
 import db_manager
 
 # -------------------------------------------------
@@ -30,7 +28,6 @@ GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 GREEN_API_URL = "https://api.greenapi.com"
 
 WHATSAPP_VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
-
 PAYMENT_AMOUNT = "2.00"
 
 RELATIONSHIP_TYPES = [
@@ -54,10 +51,7 @@ def startup_event():
 # -------------------------------------------------
 def send_whatsapp_message(to_chat_id: str, message_text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
-    payload = {
-        "chatId": f"{to_chat_id}@c.us",
-        "message": message_text
-    }
+    payload = {"chatId": f"{to_chat_id}@c.us", "message": message_text}
     requests.post(url, json=payload, timeout=10)
 
 # -------------------------------------------------
@@ -68,10 +62,8 @@ async def verify_webhook(request: Request):
     mode = request.query_params.get("hub.mode")
     token = request.query_params.get("hub.verify_token")
     challenge = request.query_params.get("hub.challenge")
-
     if mode == "subscribe" and token == WHATSAPP_VERIFY_TOKEN:
         return PlainTextResponse(challenge)
-
     raise HTTPException(status_code=403)
 
 # -------------------------------------------------
@@ -80,12 +72,10 @@ async def verify_webhook(request: Request):
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
     auth_header = request.headers.get("Authorization")
-    if GREEN_API_AUTH_TOKEN:
-        if not auth_header or auth_header.replace("Bearer ", "") != GREEN_API_AUTH_TOKEN:
-            raise HTTPException(status_code=401)
+    if GREEN_API_AUTH_TOKEN and (not auth_header or auth_header.replace("Bearer ", "") != GREEN_API_AUTH_TOKEN):
+        raise HTTPException(status_code=401)
 
     payload = await request.json()
-
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
@@ -106,7 +96,6 @@ async def whatsapp_webhook(request: Request):
 
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
-
     return JSONResponse({"status": "processed"})
 
 # -------------------------------------------------
@@ -118,25 +107,15 @@ def handle_message(phone: str, text: str) -> str:
     uid = user["id"]
     state = user["chat_state"]
 
-    # EXIT anytime
     if text_clean == "exit":
         db_manager.reset_user(uid)
         return "❌ Conversation ended. Type HELLO to start again."
 
-    # First contact
     if state == "NEW":
         db_manager.update_chat_state(uid, "AWAITING_HELLO")
         return (
-            "👋 Welcome to our matchmaking service.\n\n"
-            "🔐 Privacy Policy:\n"
-            "Your data is confidential and only shared after payment consent.\n\n"
-            "📌 How it works:\n"
-            "1. You answer a few questions\n"
-            "2. We find matches near you\n"
-            "3. You pay $2 to unlock full profiles\n\n"
-            "💳 Payment: EcoCash via Paynow\n\n"
-            "➡️ Type HELLO to begin\n"
-            "➡️ Type EXIT anytime to cancel"
+            "👋 Welcome! Type HELLO to start.\n"
+            "Privacy: your data is safe and only shared after payment."
         )
 
     if state == "AWAITING_HELLO":
@@ -165,10 +144,7 @@ def handle_message(phone: str, text: str) -> str:
     if state == "GET_LOCATION":
         db_manager.update_profile_field(uid, "location", text)
         db_manager.update_chat_state(uid, "GET_RELATIONSHIP_TYPE")
-        return (
-            "Preferred relationship type:\n" +
-            "\n".join(f"- {r}" for r in RELATIONSHIP_TYPES)
-        )
+        return "Preferred relationship type:\n" + "\n".join(f"- {r}" for r in RELATIONSHIP_TYPES)
 
     if state == "GET_RELATIONSHIP_TYPE":
         if text.capitalize() not in RELATIONSHIP_TYPES:
@@ -193,23 +169,20 @@ def handle_message(phone: str, text: str) -> str:
     return "Type EXIT to restart."
 
 # -------------------------------------------------
-# AI MATCH PREVIEW (NO CONTACT DETAILS)
+# AI MATCH PREVIEW
 # -------------------------------------------------
 def preview_matches(user_id: int) -> str:
     matches = db_manager.ai_match_preview(user_id)
-
     if not matches:
-        db_manager.reset_user(user_id)
-        return "No matches found. Type HELLO to try again."
+        return "No matches yet. Please try again tomorrow as more users join."
 
-    msg = "🔥 Potential Matches Found:\n\n"
+    msg = "🔥 Potential Matches:\n\n"
     for m in matches:
         msg += f"- {m['name']} ({m['location']}) — {m['relationship_type']}\n"
 
     msg += "\n💳 Pay $2 to unlock full profiles."
     db_manager.update_chat_state(user_id, "AWAITING_PAYMENT")
     msg += "\n\n" + initiate_payment(user_id)
-
     return msg
 
 # -------------------------------------------------
@@ -217,13 +190,7 @@ def preview_matches(user_id: int) -> str:
 # -------------------------------------------------
 def initiate_payment(user_id: int) -> str:
     reference = f"PAY-{user_id}-{int(time.time())}"
-
-    auth_string = (
-        f"{PAYNOW_ID}{reference}{PAYMENT_AMOUNT}"
-        f"Match Unlock{BASE_URL}/paid{BASE_URL}/paynow/ipn"
-        f"Message{PAYNOW_KEY}"
-    )
-
+    auth_string = f"{PAYNOW_ID}{reference}{PAYMENT_AMOUNT}Match Unlock{BASE_URL}/paid{BASE_URL}/paynow/ipnMessage{PAYNOW_KEY}"
     hash_val = hashlib.sha512(auth_string.encode()).hexdigest().upper()
 
     payload = {
@@ -244,7 +211,6 @@ def initiate_payment(user_id: int) -> str:
 
     poll_url = res.text.split("pollurl=")[-1].strip()
     db_manager.create_transaction(user_id, reference, poll_url, PAYMENT_AMOUNT)
-
     return f"\n👉 Pay here:\n{poll_url}"
 
 # -------------------------------------------------
@@ -255,11 +221,9 @@ async def paynow_ipn(request: Request):
     data = await request.form()
     reference = data.get("reference")
     status = data.get("status")
-
     if status == "Paid":
         tx = db_manager.get_transaction_by_reference(reference)
         if tx:
             db_manager.mark_transaction_paid(tx["id"])
             db_manager.unlock_full_profiles(tx["user_id"])
-
     return PlainTextResponse("OK")
