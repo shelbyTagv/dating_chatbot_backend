@@ -190,8 +190,19 @@ def initiate_payment(user_id: int) -> str:
     reference = f"SUB-{user_id}-{int(time.time())}"
     amount = "5.00"
 
-    auth_string = f"{PAYNOW_ID}{reference}{amount}{PAYNOW_KEY}"
-    hash_val = hashlib.sha512(auth_string.encode()).hexdigest()
+    # PAYNOW HASH (ORDER MATTERS)
+    auth_string = (
+        f"{PAYNOW_ID}"
+        f"{reference}"
+        f"{amount}"
+        f"Dating subscription"
+        f"{BASE_URL}/paid"
+        f"{BASE_URL}/paynow/ipn"
+        f"Message"
+        f"{PAYNOW_KEY}"
+    )
+
+    hash_val = hashlib.sha512(auth_string.encode("utf-8")).hexdigest().upper()
 
     payload = {
         "id": PAYNOW_ID,
@@ -204,15 +215,28 @@ def initiate_payment(user_id: int) -> str:
         "hash": hash_val,
     }
 
-    res = requests.post(PAYNOW_INIT_URL, data=payload)
+    try:
+        res = requests.post(PAYNOW_INIT_URL, data=payload, timeout=15)
+    except Exception:
+        return "❌ Payment service unreachable."
 
-    if "pollurl=" not in res.text:
-        return "❌ Payment failed."
+    # DEBUG (important)
+    print("PAYNOW RESPONSE:", res.text)
 
-    poll_url = res.text.split("pollurl=")[-1]
+    if "pollurl=" not in res.text.lower():
+        return (
+            "❌ Payment initialization failed.\n"
+            "Please try again later or contact support."
+        )
+
+    poll_url = res.text.split("pollurl=")[-1].strip()
     db_manager.create_transaction(user_id, reference, poll_url, amount)
 
-    return f"💰 Pay here: {poll_url}"
+    return (
+        "💰 Subscription payment required\n\n"
+        f"Click here to pay:\n{poll_url}\n\n"
+        "After payment, you will be activated automatically."
+    )
 
 # -------------------------------------------------
 # PAYNOW IPN
