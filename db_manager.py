@@ -37,15 +37,24 @@ def get_conn():
     return get_db_pool().get_connection()
 
 # -------------------------------------------------
-# INIT DB
+# INIT DB (DROP & CREATE TABLES)
 # -------------------------------------------------
 def init_db():
     conn = get_conn()
     cur = conn.cursor()
 
     try:
+        # --- DROP TABLES if they exist ---
+        cur.execute("SET FOREIGN_KEY_CHECKS = 0;")
+        cur.execute("DROP TABLE IF EXISTS transactions;")
+        cur.execute("DROP TABLE IF EXISTS profiles;")
+        cur.execute("DROP TABLE IF EXISTS users;")
+        cur.execute("SET FOREIGN_KEY_CHECKS = 1;")
+        print("✅ Existing tables dropped")
+
+        # --- CREATE TABLES ---
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone_number VARCHAR(20) UNIQUE NOT NULL,
             chat_state VARCHAR(50) DEFAULT 'NEW',
@@ -56,7 +65,7 @@ def init_db():
         """)
 
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
+        CREATE TABLE profiles (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT UNIQUE NOT NULL,
             name VARCHAR(100),
@@ -71,7 +80,7 @@ def init_db():
         """)
 
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS transactions (
+        CREATE TABLE transactions (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT NOT NULL,
             paynow_reference VARCHAR(100) UNIQUE,
@@ -84,6 +93,7 @@ def init_db():
         """)
 
         conn.commit()
+        print("✅ Tables created successfully")
     finally:
         cur.close()
         conn.close()
@@ -94,32 +104,18 @@ def init_db():
 def get_or_create_user(phone):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-
     try:
-        cur.execute(
-            "SELECT * FROM users WHERE phone_number=%s",
-            (phone,),
-        )
+        cur.execute("SELECT * FROM users WHERE phone_number=%s", (phone,))
         user = cur.fetchone()
-
         if not user:
-            cur.execute(
-                "INSERT INTO users (phone_number) VALUES (%s)",
-                (phone,),
-            )
+            cur.execute("INSERT INTO users (phone_number) VALUES (%s)", (phone,))
             conn.commit()
-
-            cur.execute(
-                "SELECT * FROM users WHERE phone_number=%s",
-                (phone,),
-            )
+            cur.execute("SELECT * FROM users WHERE phone_number=%s", (phone,))
             user = cur.fetchone()
     finally:
         cur.close()
         conn.close()
-
     return user
-
 
 def update_chat_state(user_id, state):
     conn = get_conn()
@@ -129,11 +125,9 @@ def update_chat_state(user_id, state):
     cur.close()
     conn.close()
 
-
 def reset_user(user_id):
     conn = get_conn()
     cur = conn.cursor()
-
     cur.execute("DELETE FROM profiles WHERE user_id=%s", (user_id,))
     cur.execute("""
         UPDATE users
@@ -142,7 +136,6 @@ def reset_user(user_id):
             subscription_expiry=NULL
         WHERE id=%s
     """, (user_id,))
-
     conn.commit()
     cur.close()
     conn.close()
@@ -168,13 +161,10 @@ def ensure_profile(user_id):
     cur.close()
     conn.close()
 
-
 def update_profile_field(user_id, field, value):
     if field not in ALLOWED_PROFILE_FIELDS:
         raise ValueError("Invalid profile field")
-
     ensure_profile(user_id)
-
     conn = get_conn()
     cur = conn.cursor()
     cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, user_id))
@@ -197,7 +187,6 @@ def create_transaction(user_id, reference, poll_url, amount):
     cur.close()
     conn.close()
 
-
 def get_transaction_by_reference(reference):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
@@ -207,7 +196,6 @@ def get_transaction_by_reference(reference):
     conn.close()
     return tx
 
-
 def mark_transaction_paid(tx_id):
     conn = get_conn()
     cur = conn.cursor()
@@ -216,10 +204,8 @@ def mark_transaction_paid(tx_id):
     cur.close()
     conn.close()
 
-
 def unlock_full_profiles(user_id):
     expiry = datetime.utcnow() + timedelta(days=1)
-
     conn = get_conn()
     cur = conn.cursor()
     cur.execute("""
@@ -239,7 +225,6 @@ def unlock_full_profiles(user_id):
 def ai_match_preview(user_id):
     conn = get_conn()
     cur = conn.cursor(dictionary=True)
-
     cur.execute("""
         SELECT
             P.name,
@@ -252,7 +237,6 @@ def ai_match_preview(user_id):
             AND U.is_active = 1
         LIMIT 5
     """, (user_id,))
-
     results = cur.fetchall()
     cur.close()
     conn.close()
