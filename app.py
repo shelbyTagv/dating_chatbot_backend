@@ -89,6 +89,16 @@ async def verify_webhook(request: Request):
 # -------------------------------------------------
 @app.post("/webhook")
 async def whatsapp_webhook(request: Request):
+    headers = dict(request.headers)
+    print("Incoming headers:", headers)  # Log all headers
+    payload = await request.json()
+    print("Payload received:", payload)
+    return JSONResponse(content={"status": "Debug headers logged"}, status_code=200)
+
+
+
+
+
     auth_header = request.headers.get("Authorization")
 
     if GREEN_API_AUTH_TOKEN and auth_header != GREEN_API_AUTH_TOKEN:
