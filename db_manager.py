@@ -13,6 +13,7 @@ dbconfig = {
     "user": os.getenv("MYSQLUSER"),
     "password": os.getenv("MYSQLPASSWORD"),
     "database": os.getenv("MYSQL_DATABASE"),
+    "port": os.getenv("MYSQL_PORT", 3306) # Added PORT, defaulting to 3306 if not set
 }
 
 pool = mysql.connector.pooling.MySQLConnectionPool(
