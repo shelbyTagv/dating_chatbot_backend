@@ -47,6 +47,7 @@ def init_db():
         age INT,
         location VARCHAR(100),
         intent VARCHAR(50),
+        preferred_gender VARCHAR(10),
         age_min INT,
         age_max INT,
         contact_phone VARCHAR(20),
@@ -77,7 +78,7 @@ def get_or_create_user(phone):
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
     u = cur.fetchone()
     if not u:
-        cur.execute("INSERT INTO users (phone,chat_state) VALUES (%s,'NEW')", (phone,))
+        cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s,'NEW')", (phone,))
         c.commit()
         cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
         u = cur.fetchone()
@@ -85,7 +86,7 @@ def get_or_create_user(phone):
     c.close()
     return u
 
-def update_chat_state(uid, state):
+def set_state(uid, state):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, uid))
@@ -102,7 +103,7 @@ def reset_user(uid):
     cur.close()
     c.close()
 
-def update_gender(uid, gender):
+def set_gender(uid, gender):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET gender=%s WHERE id=%s", (gender, uid))
@@ -110,7 +111,7 @@ def update_gender(uid, gender):
     cur.close()
     c.close()
 
-def update_profile_field(uid, field, value):
+def upsert_profile(uid, field, value):
     c = conn()
     cur = c.cursor()
     cur.execute("INSERT IGNORE INTO profiles (user_id) VALUES (%s)", (uid,))
@@ -119,11 +120,9 @@ def update_profile_field(uid, field, value):
     cur.close()
     c.close()
 
-# -------------------------------------------------
 def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
-
     cur.execute("""
     SELECT p.*
     FROM profiles p
@@ -131,32 +130,39 @@ def get_matches(uid, limit=2):
     WHERE u.id!=%s
     LIMIT %s
     """, (uid, limit))
-
     res = cur.fetchall()
     cur.close()
     c.close()
     return res
 
-# -------------------------------------------------
-def create_transaction(uid, ref, poll, amount):
+def create_tx(uid, ref, poll_url, amount="2.00"):
     c = conn()
     cur = c.cursor()
     cur.execute("""
-    INSERT INTO transactions (user_id,reference,poll_url,amount,status)
-    VALUES (%s,%s,%s,%s,'PENDING')
-    """, (uid, ref, poll, amount))
+    INSERT INTO transactions (user_id, reference, poll_url, amount, status)
+    VALUES (%s, %s, %s, %s, 'PENDING')
+    """, (uid, ref, poll_url, amount))
     c.commit()
     cur.close()
     c.close()
 
-def mark_transaction_paid(ref):
+def mark_paid(reference):
     c = conn()
     cur = c.cursor()
-    cur.execute("UPDATE transactions SET status='PAID' WHERE reference=%s", (ref,))
+    cur.execute("UPDATE transactions SET status='PAID' WHERE reference=%s", (reference,))
     cur.execute("""
     UPDATE users SET is_active=1, subscription_expiry=%s
     WHERE id=(SELECT user_id FROM transactions WHERE reference=%s)
-    """, (datetime.utcnow()+timedelta(days=1), ref))
+    """, (datetime.utcnow() + timedelta(days=1), reference))
     c.commit()
     cur.close()
     c.close()
+
+def get_transaction_by_reference(reference):
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM transactions WHERE reference=%s", (reference,))
+    tx = cur.fetchone()
+    cur.close()
+    c.close()
+    return tx
