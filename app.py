@@ -8,7 +8,6 @@ import requests
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
 import db_manager
-from datetime import datetime, timedelta
 
 app = FastAPI()
 
@@ -116,27 +115,27 @@ def handle_message(phone: str, text: str) -> str:
 
     # EXIT handling
     if msg_l == "exit":
-        db_manager.update_chat_state(uid, "NEW")
+        db_manager.set_state(uid, "NEW")
         return "❌ Conversation ended.\nType HELLO to start again."
 
     # NEW user
     if state == "NEW":
-        db_manager.update_chat_state(uid, "GET_GENDER")
+        db_manager.set_state(uid, "GET_GENDER")
         return "Welcome to Shelby Date Connections ❤️\n\nWhat is your gender? (MALE/FEMALE/OTHER)"
 
     # GET GENDER
     if state == "GET_GENDER":
         if msg_l not in ["male", "female", "other"]:
             return "Please type MALE, FEMALE, or OTHER."
-        db_manager.update_gender(uid, msg_l)
-        db_manager.update_chat_state(uid, "WELCOME")
+        db_manager.set_gender(uid, msg_l)
+        db_manager.set_state(uid, "WELCOME")
         return "Thanks! Your gender is saved.\n\nType HELLO to start the conversation."
 
     # WELCOME
     if state == "WELCOME":
         if msg_l != "hello":
             return "Please type HELLO to continue."
-        db_manager.update_chat_state(uid, "GET_INTENT")
+        db_manager.set_state(uid, "GET_INTENT")
         return (
             "What are you looking for?\n\n"
             "1️⃣ Sugar mummy\n"
@@ -156,7 +155,7 @@ def handle_message(phone: str, text: str) -> str:
             return "Please reply with a number (1–8)."
         db_manager.upsert_profile(uid, "intent", intent)
         db_manager.upsert_profile(uid, "preferred_gender", infer_gender(intent))
-        db_manager.update_chat_state(uid, "GET_AGE_RANGE")
+        db_manager.set_state(uid, "GET_AGE_RANGE")
         return (
             "Preferred age range:\n\n"
             "1️⃣ 18-25\n"
@@ -174,13 +173,13 @@ def handle_message(phone: str, text: str) -> str:
             return "Choose a valid age range (1–6)."
         db_manager.upsert_profile(uid, "age_min", r[0])
         db_manager.upsert_profile(uid, "age_max", r[1])
-        db_manager.update_chat_state(uid, "GET_NAME")
+        db_manager.set_state(uid, "GET_NAME")
         return "Your name?"
 
     # GET NAME
     if state == "GET_NAME":
         db_manager.upsert_profile(uid, "name", msg)
-        db_manager.update_chat_state(uid, "GET_AGE")
+        db_manager.set_state(uid, "GET_AGE")
         return "Your age?"
 
     # GET AGE
@@ -188,20 +187,20 @@ def handle_message(phone: str, text: str) -> str:
         if not msg.isdigit():
             return "Please enter a valid age."
         db_manager.upsert_profile(uid, "age", int(msg))
-        db_manager.update_chat_state(uid, "GET_LOCATION")
+        db_manager.set_state(uid, "GET_LOCATION")
         return "Your location?"
 
     # GET LOCATION
     if state == "GET_LOCATION":
         db_manager.upsert_profile(uid, "location", msg)
-        db_manager.update_chat_state(uid, "GET_PHONE")
+        db_manager.set_state(uid, "GET_PHONE")
         return "Your phone number?"
 
     # GET PHONE
     if state == "GET_PHONE":
         db_manager.upsert_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
-        db_manager.update_chat_state(uid, "PAY")
+        db_manager.set_state(uid, "PAY")
 
         if not matches:
             return "No matches found yet. Try again later."
@@ -212,49 +211,7 @@ def handle_message(phone: str, text: str) -> str:
 
         return preview + "\n💳 Pay $2 to unlock contacts."
 
-    # PAY
-    if state == "PAY":
-        reference = f"PAY-{uid}-{int(time.time())}"
-        auth_string = f"{PAYNOW_ID}{reference}{PAYMENT_AMOUNT}Unlock{BASE_URL}/paid{BASE_URL}/paynow/ipn{PAYNOW_KEY}"
-        hash_val = hashlib.sha512(auth_string.encode()).hexdigest().upper()
-
-        res = requests.post(
-            PAYNOW_INIT_URL,
-            data={
-                "id": PAYNOW_ID,
-                "reference": reference,
-                "amount": PAYMENT_AMOUNT,
-                "additionalinfo": "Unlock",
-                "returnurl": f"{BASE_URL}/paid",
-                "resulturl": f"{BASE_URL}/paynow/ipn",
-                "status": "Message",
-                "hash": hash_val,
-            },
-            timeout=15,
-        )
-
-        poll_url = res.text.split("pollurl=")[-1].strip()
-        db_manager.create_transaction(uid, reference, poll_url, PAYMENT_AMOUNT)
-        return f"👉 Pay here:\n{poll_url}"
-
     return "Type EXIT to restart."
-
-# -------------------------------------------------
-# PAYNOW IPN
-# -------------------------------------------------
-@app.post("/paynow/ipn")
-async def paynow_ipn(request: Request):
-    data = await request.form()
-    reference = data.get("reference")
-    status = data.get("status")
-
-    if status and status.lower() == "paid":
-        tx = db_manager.get_transaction_by_reference(reference)
-        if tx:
-            db_manager.mark_transaction_paid(reference)
-            db_manager.unlock_full_profiles(tx["user_id"])
-
-    return PlainTextResponse("OK")
 
 # -------------------------------------------------
 # HELPER
