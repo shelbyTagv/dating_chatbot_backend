@@ -131,7 +131,7 @@ def handle_message(phone, text):
         db_manager.reset_profile(uid)  # ✅ reset profile on new flow
         db_manager.set_state(uid, "GET_GENDER")
         return (
-            "👋 Welcome!\n\n"
+            "👋 Welcome To Shelby Date Connections!\n\n"
             "Please tell us your gender:\n"
             "• MALE\n"
             "• FEMALE\n"
@@ -143,11 +143,9 @@ def handle_message(phone, text):
             return "❗ Please reply with *MALE*, *FEMALE*, or *OTHER*."
         db_manager.set_gender(uid, msg_l)
         db_manager.set_state(uid, "WELCOME")
-        return "✅ Saved!\n\nType *HELLO* to continue."
+        return "✅ Saved!"
 
     if state == "WELCOME":
-        if msg_l != "hello":
-            return "👉 Please type *HELLO* to proceed."
         db_manager.set_state(uid, "GET_INTENT")
         return (
             "💖 What are you looking for?\n\n"
