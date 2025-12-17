@@ -3,9 +3,7 @@ load_dotenv()
 
 import os
 import mysql.connector.pooling
-from datetime import datetime, timedelta
 import random
-import json
 from openai import OpenAI
 
 # -------------------------------------------------
@@ -28,14 +26,19 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# INIT DB
+# INIT DB (DROP & CREATE TABLES)
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
     try:
+        # Drop tables if they exist
+        cur.execute("DROP TABLE IF EXISTS profiles")
+        cur.execute("DROP TABLE IF EXISTS users")
+
+        # Create users table
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone VARCHAR(20) UNIQUE NOT NULL,
             gender VARCHAR(10),
@@ -45,8 +48,9 @@ def init_db():
         )
         """)
 
+        # Create profiles table with user_id as PRIMARY KEY (no duplicate)
         cur.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
+        CREATE TABLE profiles (
             user_id INT PRIMARY KEY,
             name VARCHAR(100),
             age INT,
@@ -65,7 +69,7 @@ def init_db():
         c.close()
 
 # -------------------------------------------------
-# USER
+# USER FUNCTIONS
 # -------------------------------------------------
 def get_user_by_phone(phone):
     c = conn()
@@ -113,7 +117,7 @@ def set_gender(uid, gender):
         c.close()
 
 # -------------------------------------------------
-# PROFILE (ONE ROW PER USER)
+# PROFILE FUNCTIONS
 # -------------------------------------------------
 def ensure_profile(uid):
     c = conn()
@@ -154,10 +158,7 @@ def update_profile(uid, field, value):
     c = conn()
     cur = c.cursor()
     try:
-        cur.execute(
-            f"UPDATE profiles SET {field}=%s WHERE user_id=%s",
-            (value, uid)
-        )
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, uid))
         c.commit()
     finally:
         cur.close()
@@ -171,9 +172,9 @@ openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
 def get_matches(uid, limit=2):
     c = conn()
-    cur = c.cursor(dictionary=True, buffered=True)  # ✅ buffered cursor
+    cur = c.cursor(dictionary=True, buffered=True)  # ✅ buffered to avoid unread result
     try:
-        # fetch current user's profile
+        # Fetch current user's profile
         cur.execute("""
             SELECT p.*, u.gender
             FROM profiles p
@@ -184,7 +185,7 @@ def get_matches(uid, limit=2):
         if not me:
             return []
 
-        # fetch all candidates
+        # Fetch all other candidates
         cur.execute("""
             SELECT p.*, u.gender
             FROM profiles p
@@ -201,6 +202,7 @@ def get_matches(uid, limit=2):
     if not candidates:
         return []
 
+    # Format and randomize matches
     data = []
     for c in candidates:
         data.append({
