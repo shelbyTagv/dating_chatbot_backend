@@ -1,9 +1,10 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import os, random
+import os
 import mysql.connector.pooling
 from datetime import datetime, timedelta
+import random
 
 _pool = None
 
@@ -30,7 +31,7 @@ def conn():
 def init_db():
     c = conn()
     cur = c.cursor()
-
+    
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -41,7 +42,7 @@ def init_db():
         subscription_expiry DATETIME
     )
     """)
-
+    
     cur.execute("""
     CREATE TABLE IF NOT EXISTS profiles (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -83,10 +84,9 @@ def get_or_create_user(phone):
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
     u = cur.fetchone()
     if not u:
-        # Create new user and always a new row
         cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s,'NEW')", (phone,))
         c.commit()
-        cur.execute("SELECT * FROM users WHERE id=LAST_INSERT_ID()")
+        cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
         u = cur.fetchone()
     cur.close()
     c.close()
@@ -124,20 +124,21 @@ def create_profile(uid, name="", age=None, location="", intent="", preferred_gen
 
 def upsert_profile(uid, field, value):
     """
-    Updates last incomplete profile if exists, otherwise creates a new profile row.
+    Append-only: if last profile has empty field, update it; else create new row.
     """
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
     profile = cur.fetchone()
 
-    if not profile or all(v is not None and v != "" for k,v in profile.items() if k not in ["id","user_id"]):
-        # Last profile filled or doesn't exist -> create new
+    if profile and (profile.get(field) is None or profile.get(field) == ""):
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
+    else:
         create_profile(uid)
         cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
         profile = cur.fetchone()
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
 
-    cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
     c.commit()
     cur.close()
     c.close()
@@ -149,7 +150,6 @@ def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
 
-    # Fetch current user's latest profile
     cur.execute("""
         SELECT u.gender as my_gender, u.id as user_id, p.*
         FROM profiles p
@@ -162,12 +162,11 @@ def get_matches(uid, limit=2):
     if not me:
         return []
 
-    my_gender = me["my_gender"].lower()
-    my_age = me["age"]
-    my_intent = me["intent"].lower()
-    my_pref_gender = me["preferred_gender"].lower()
+    my_gender = (me.get("my_gender") or "any").lower()
+    my_age = me.get("age") or 0
+    my_intent = (me.get("intent") or "").lower()
+    my_pref_gender = (me.get("preferred_gender") or "any").lower()
 
-    # Define intent match mapping
     intent_pairs = {
         "girlfriend": "boyfriend",
         "boyfriend": "girlfriend",
@@ -180,7 +179,6 @@ def get_matches(uid, limit=2):
         "just vibes": "just vibes"
     }
 
-    # Fetch all potential matches
     cur.execute("""
         SELECT p.*, u.gender as user_gender, u.id as user_id
         FROM profiles p
@@ -188,32 +186,26 @@ def get_matches(uid, limit=2):
         WHERE u.id != %s
           AND p.age_min IS NOT NULL
           AND p.age_max IS NOT NULL
-          AND p.preferred_gender IS NOT NULL
           AND p.intent IS NOT NULL
+          AND p.preferred_gender IS NOT NULL
           AND u.gender IS NOT NULL
     """, (uid,))
     candidates = cur.fetchall()
     cur.close()
     c.close()
 
-    # Filter candidates based on all 3 checks
     matches = []
     for c in candidates:
         cand_age_min = c["age_min"]
         cand_age_max = c["age_max"]
-        cand_intent = c["intent"].lower()
-        cand_gender = c["user_gender"].lower()
-        cand_pref_gender = c["preferred_gender"].lower()
+        cand_intent = (c["intent"] or "").lower()
+        cand_gender = (c["user_gender"] or "any").lower()
+        cand_pref_gender = (c["preferred_gender"] or "any").lower()
 
-        # 1️⃣ Age check: current user's age in candidate's preferred age range
         if not (cand_age_min <= my_age <= cand_age_max):
             continue
-
-        # 2️⃣ Intent check: candidate's intent matches the mapping
         if intent_pairs.get(my_intent) != cand_intent:
             continue
-
-        # 3️⃣ Preferred gender check: mutual preference
         if my_pref_gender != "any" and cand_gender != my_pref_gender:
             continue
         if cand_pref_gender != "any" and my_gender != cand_pref_gender:
@@ -221,18 +213,12 @@ def get_matches(uid, limit=2):
 
         matches.append(c)
 
-    # Randomize the matches
     random.shuffle(matches)
-
-    # Limit to the requested number of matches
     limited_matches = matches[:limit]
-
-    # Add info about more matches
     for m in limited_matches:
         m["more_available"] = len(matches) > limit
 
     return limited_matches
-
 
 # -------------------------------------------------
 # TRANSACTIONS
@@ -268,7 +254,3 @@ def mark_paid(ref):
     c.commit()
     cur.close()
     c.close()
-
-def unlock_full_profiles(uid):
-    # Placeholder if you want extra functionality after payment
-    pass

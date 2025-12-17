@@ -30,33 +30,7 @@ def startup():
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {"chatId": f"{phone}@c.us", "message": text}
-    try:
-        requests.post(url, json=payload, timeout=15)
-    except Exception as e:
-        print("Failed to send message:", e)
-
-# -------------------------------------------------
-# CONSTANTS
-# -------------------------------------------------
-INTENT_MAP = {
-    "1": "sugar mummy",
-    "2": "sugar daddy",
-    "3": "benten",
-    "4": "girlfriend",
-    "5": "boyfriend",
-    "6": "1 night stand",
-    "7": "just vibes",
-    "8": "friend",
-}
-
-AGE_MAP = {
-    "1": (18, 25),
-    "2": (26, 30),
-    "3": (31, 35),
-    "4": (36, 40),
-    "5": (41, 50),
-    "6": (50, 99),
-}
+    requests.post(url, json=payload, timeout=15)
 
 # -------------------------------------------------
 # WEBHOOK VERIFY
@@ -94,13 +68,39 @@ async def webhook(request: Request):
         return JSONResponse({"status": "no-text"})
 
     reply = handle_message(phone, text)
-    if reply:
-        send_whatsapp_message(phone, reply)
+    send_whatsapp_message(phone, reply)
     return JSONResponse({"status": "processed"})
 
 # -------------------------------------------------
 # CHAT LOGIC
 # -------------------------------------------------
+INTENT_MAP = {
+    "1": "sugar mummy",
+    "2": "sugar daddy",
+    "3": "benten",
+    "4": "girlfriend",
+    "5": "boyfriend",
+    "6": "1 night stand",
+    "7": "just vibes",
+    "8": "friend",
+}
+
+AGE_MAP = {
+    "1": (18, 25),
+    "2": (26, 30),
+    "3": (31, 35),
+    "4": (36, 40),
+    "5": (41, 50),
+    "6": (50, 99),
+}
+
+def infer_gender(intent):
+    if intent in ["girlfriend", "sugar mummy"]:
+        return "female"
+    if intent in ["boyfriend", "benten", "sugar daddy"]:
+        return "male"
+    return "any"
+
 def handle_message(phone: str, text: str) -> str:
     msg = text.strip()
     msg_l = msg.lower()
@@ -109,17 +109,14 @@ def handle_message(phone: str, text: str) -> str:
     uid = user["id"]
     state = user["chat_state"]
 
-    # EXIT handling
     if msg_l == "exit":
         db_manager.set_state(uid, "NEW")
         return "❌ Conversation ended.\nType HELLO to start again."
 
-    # NEW user
     if state == "NEW":
         db_manager.set_state(uid, "GET_GENDER")
         return "Welcome to Shelby Date Connections ❤️\n\nWhat is your gender? (MALE/FEMALE/OTHER)"
 
-    # GET GENDER
     if state == "GET_GENDER":
         if msg_l not in ["male", "female", "other"]:
             return "Please type MALE, FEMALE, or OTHER."
@@ -127,7 +124,6 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "WELCOME")
         return "Thanks! Your gender is saved.\n\nType HELLO to start the conversation."
 
-    # WELCOME
     if state == "WELCOME":
         if msg_l != "hello":
             return "Please type HELLO to continue."
@@ -144,11 +140,11 @@ def handle_message(phone: str, text: str) -> str:
             "8️⃣ Friend"
         )
 
-    # GET INTENT
     if state == "GET_INTENT":
         intent = INTENT_MAP.get(msg)
         if not intent:
             return "Please reply with a number (1–8)."
+
         db_manager.upsert_profile(uid, "intent", intent)
         db_manager.upsert_profile(uid, "preferred_gender", infer_gender(intent))
         db_manager.set_state(uid, "GET_AGE_RANGE")
@@ -162,7 +158,6 @@ def handle_message(phone: str, text: str) -> str:
             "6️⃣ 50+"
         )
 
-    # GET AGE RANGE
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r:
@@ -172,13 +167,11 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "GET_NAME")
         return "Your name?"
 
-    # GET NAME
     if state == "GET_NAME":
         db_manager.upsert_profile(uid, "name", msg)
         db_manager.set_state(uid, "GET_AGE")
         return "Your age?"
 
-    # GET AGE
     if state == "GET_AGE":
         if not msg.isdigit():
             return "Please enter a valid age."
@@ -186,36 +179,26 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "GET_LOCATION")
         return "Your location?"
 
-    # GET LOCATION
     if state == "GET_LOCATION":
         db_manager.upsert_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
         return "Your phone number?"
 
-    # GET PHONE
     if state == "GET_PHONE":
         db_manager.upsert_profile(uid, "contact_phone", msg)
-        matches = db_manager.get_matches(uid)
+
+        matches = db_manager.get_matches(uid, limit=2)
         db_manager.set_state(uid, "PAY")
 
         if not matches:
-            # No matches yet: end conversation gracefully
-            return "✅ Your profile is saved! We will notify you when matches are available. Check back later."
+            return "✅ Your profile is saved! No matches found yet. Check back later."
 
         preview = "🔥 Top Matches:\n\n"
         for m in matches:
-            preview += f"{m['name']} ({m['age']}) – {m['location']} [{m['intent']}]\n"
+            preview += f"{m['name']} ({m.get('age','?')}) – {m.get('location','Unknown')} [{m.get('intent','?')}]\n"
 
-        return preview + "\n💳 Pay $2 to unlock contacts."
+        preview += "\n💳 Pay $2 to unlock full contacts."
+        if matches[0].get("more_available"):
+            preview += "\n📌 There are more matches available!"
 
-    return "Type EXIT to restart."
-
-# -------------------------------------------------
-# HELPER
-# -------------------------------------------------
-def infer_gender(intent):
-    if intent in ["girlfriend", "sugar mummy"]:
-        return "female"
-    if intent in ["boyfriend", "benten", "sugar daddy"]:
-        return "male"
-    return "any"
+        return preview
