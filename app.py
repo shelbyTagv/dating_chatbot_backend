@@ -12,6 +12,8 @@ import db_manager
 app = FastAPI()
 
 # -------------------------------------------------
+# ENV CONFIG
+# -------------------------------------------------
 GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
@@ -24,16 +26,22 @@ BASE_URL = os.getenv("BASE_URL")
 PAYMENT_AMOUNT = "2.00"
 
 # -------------------------------------------------
+# STARTUP
+# -------------------------------------------------
 @app.on_event("startup")
 def startup():
     db_manager.init_db()
 
+# -------------------------------------------------
+# SEND WHATSAPP MESSAGE
 # -------------------------------------------------
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {"chatId": f"{phone}@c.us", "message": text}
     requests.post(url, json=payload, timeout=15)
 
+# -------------------------------------------------
+# CONSTANTS
 # -------------------------------------------------
 INTENT_MAP = {
     "1": "sugar mummy",
@@ -56,10 +64,14 @@ AGE_MAP = {
 }
 
 # -------------------------------------------------
+# WEBHOOK VERIFY
+# -------------------------------------------------
 @app.get("/webhook")
 async def verify_webhook(request: Request):
     return PlainTextResponse("OK")
 
+# -------------------------------------------------
+# INCOMING WEBHOOK
 # -------------------------------------------------
 @app.post("/webhook")
 async def webhook(request: Request):
@@ -91,6 +103,8 @@ async def webhook(request: Request):
     return JSONResponse({"status": "processed"})
 
 # -------------------------------------------------
+# CHAT LOGIC
+# -------------------------------------------------
 def handle_message(phone: str, text: str) -> str:
     msg = text.strip()
     msg_l = msg.lower()
@@ -99,27 +113,45 @@ def handle_message(phone: str, text: str) -> str:
     uid = user["id"]
     state = user["chat_state"]
 
+    # EXIT handling
     if msg_l == "exit":
         db_manager.set_state(uid, "NEW")
         return "❌ Conversation ended.\nType HELLO to start again."
 
+    # NEW user
     if state == "NEW":
         db_manager.set_state(uid, "GET_GENDER")
-        return "Welcome! What is your gender? (MALE/FEMALE/OTHER)"
+        return "Welcome to Shelby Date Connections ❤️\n\nWhat is your gender? (MALE/FEMALE/OTHER)"
 
+    # GET GENDER
     if state == "GET_GENDER":
         if msg_l not in ["male", "female", "other"]:
             return "Please type MALE, FEMALE, or OTHER."
         db_manager.set_gender(uid, msg_l)
         db_manager.set_state(uid, "WELCOME")
-        return "Thanks! Type HELLO to start."
+        return (
+            "Thanks! Your gender is saved.\n\n"
+            "Type HELLO to start the conversation."
+        )
 
+    # WELCOME
     if state == "WELCOME":
         if msg_l != "hello":
             return "Please type HELLO to continue."
         db_manager.set_state(uid, "GET_INTENT")
-        return "What are you looking for?\n" + "\n".join([f"{k}️⃣ {v}" for k,v in INTENT_MAP.items()])
+        return (
+            "What are you looking for?\n\n"
+            "1️⃣ Sugar mummy\n"
+            "2️⃣ Sugar daddy\n"
+            "3️⃣ Benten\n"
+            "4️⃣ Girlfriend\n"
+            "5️⃣ Boyfriend\n"
+            "6️⃣ 1 night stand\n"
+            "7️⃣ Just vibes\n"
+            "8️⃣ Friend"
+        )
 
+    # GET INTENT
     if state == "GET_INTENT":
         intent = INTENT_MAP.get(msg)
         if not intent:
@@ -127,8 +159,17 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.upsert_profile(uid, "intent", intent)
         db_manager.upsert_profile(uid, "preferred_gender", infer_gender(intent))
         db_manager.set_state(uid, "GET_AGE_RANGE")
-        return "Preferred age range:\n" + "\n".join([f"{k}️⃣ {v[0]}-{v[1]}" for k,v in AGE_MAP.items()])
+        return (
+            "Preferred age range:\n\n"
+            "1️⃣ 18-25\n"
+            "2️⃣ 26-30\n"
+            "3️⃣ 31-35\n"
+            "4️⃣ 36-40\n"
+            "5️⃣ 41-50\n"
+            "6️⃣ 50+"
+        )
 
+    # GET AGE RANGE
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r:
@@ -138,11 +179,13 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "GET_NAME")
         return "Your name?"
 
+    # GET NAME
     if state == "GET_NAME":
         db_manager.upsert_profile(uid, "name", msg)
         db_manager.set_state(uid, "GET_AGE")
         return "Your age?"
 
+    # GET AGE
     if state == "GET_AGE":
         if not msg.isdigit():
             return "Please enter a valid age."
@@ -150,11 +193,13 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "GET_LOCATION")
         return "Your location?"
 
+    # GET LOCATION
     if state == "GET_LOCATION":
         db_manager.upsert_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
         return "Your phone number?"
 
+    # GET PHONE
     if state == "GET_PHONE":
         db_manager.upsert_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
@@ -163,12 +208,13 @@ def handle_message(phone: str, text: str) -> str:
         if not matches:
             return "No matches found yet. Try again later."
 
-        preview = "🔥 Top Matches:\n"
+        preview = "🔥 Top Matches:\n\n"
         for m in matches:
             preview += f"{m['name']} ({m['age']}) – {m['location']} [{m['intent']}]\n"
 
         return preview + "\n💳 Pay $2 to unlock contacts."
 
+    # PAY
     if state == "PAY":
         reference = f"PAY-{uid}-{int(time.time())}"
         auth_string = f"{PAYNOW_ID}{reference}{PAYMENT_AMOUNT}Unlock{BASE_URL}/paid{BASE_URL}/paynow/ipn{PAYNOW_KEY}"
@@ -190,11 +236,13 @@ def handle_message(phone: str, text: str) -> str:
         )
 
         poll_url = res.text.split("pollurl=")[-1].strip()
-        db_manager.create_tx(uid, reference, poll_url)
+        db_manager.create_tx(uid, reference, poll_url, PAYMENT_AMOUNT)
         return f"👉 Pay here:\n{poll_url}"
 
     return "Type EXIT to restart."
 
+# -------------------------------------------------
+# PAYNOW IPN
 # -------------------------------------------------
 @app.post("/paynow/ipn")
 async def paynow_ipn(request: Request):
@@ -206,9 +254,12 @@ async def paynow_ipn(request: Request):
         tx = db_manager.get_transaction_by_reference(reference)
         if tx:
             db_manager.mark_paid(reference)
+            db_manager.unlock_full_profiles(tx["user_id"])
 
     return PlainTextResponse("OK")
 
+# -------------------------------------------------
+# HELPER
 # -------------------------------------------------
 def infer_gender(intent):
     if intent in ["girlfriend", "sugar mummy"]:
