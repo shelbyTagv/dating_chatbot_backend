@@ -74,28 +74,19 @@ def init_db():
     c.close()
 
 # ------------------------------
-# USER MANAGEMENT
+# USER MANAGEMENT (OPTION 1)
 # ------------------------------
 def create_new_user(phone, gender=None):
-    """Create exactly one user per conversation."""
+    """Always create a new user row per conversation attempt"""
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("INSERT INTO users (phone, gender, chat_state) VALUES (%s,%s,'NEW')", (phone, gender))
     c.commit()
-    cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
+    cur.execute("SELECT * FROM users WHERE id=LAST_INSERT_ID()")
     user = cur.fetchone()
     cur.close()
     c.close()
     return user
-
-def get_user_by_phone(phone):
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
-    u = cur.fetchone()
-    cur.close()
-    c.close()
-    return u
 
 def set_state(uid, state):
     c = conn()
@@ -117,6 +108,7 @@ def set_gender(uid, gender):
 # PROFILE MANAGEMENT
 # ------------------------------
 def create_profile(uid, name="", age=None, location="", intent="", preferred_gender="any", age_min=None, age_max=None, contact_phone=""):
+    """Create a profile linked to a unique user_id"""
     c = conn()
     cur = c.cursor()
     cur.execute("""
@@ -128,7 +120,7 @@ def create_profile(uid, name="", age=None, location="", intent="", preferred_gen
     c.close()
 
 def update_profile(uid, field, value):
-    """Update latest profile for user"""
+    """Update the latest profile of the given user_id"""
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
@@ -146,7 +138,7 @@ OPENAI_KEY = os.getenv("OPENAI_API_KEY")
 openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
 def get_matches(uid, limit=2):
-    """Scan existing profiles in DB and return top 2 matches for the current user's last profile."""
+    """Return top matches from existing profiles excluding the current user"""
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("""
@@ -162,7 +154,6 @@ def get_matches(uid, limit=2):
         c.close()
         return []
 
-    # Candidates: all other profiles
     cur.execute("""
         SELECT p.*, u.gender as user_gender, u.id as user_id
         FROM profiles p
@@ -175,7 +166,6 @@ def get_matches(uid, limit=2):
     if not candidates:
         return []
 
-    # Build candidate list
     candidate_data = [{
         "id": c["user_id"],
         "name": c.get("name"),
@@ -186,7 +176,6 @@ def get_matches(uid, limit=2):
         "location": c.get("location")
     } for c in candidates]
 
-    # AI fallback
     if not openai_client:
         random.shuffle(candidate_data)
         for i in candidate_data:
@@ -209,13 +198,11 @@ def get_matches(uid, limit=2):
         )
         scores = json.loads(resp.choices[0].message.content)
     except Exception:
-        # Fallback
         random.shuffle(candidate_data)
         for i in candidate_data:
             i["score"] = random.randint(50, 100)
         return candidate_data[:limit]
 
-    # Merge scores
     for c in candidate_data:
         for s in scores:
             if s["id"] == c["id"]:
