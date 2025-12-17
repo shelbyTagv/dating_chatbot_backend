@@ -142,11 +142,7 @@ def handle_message(phone, text):
         if msg_l not in ["male", "female", "other"]:
             return "❗ Please reply with *MALE*, *FEMALE*, or *OTHER*."
         db_manager.set_gender(uid, msg_l)
-        db_manager.set_state(uid, "WELCOME")
-        return "✅ Saved!"
-
-    if state == "WELCOME":
-        db_manager.set_state(uid, "GET_INTENT")
+        db_manager.set_state(uid, "GET_INTENT")  # Jump straight to intent
         return (
             "💖 What are you looking for?\n\n"
             "1️⃣ Sugar mummy\n"
@@ -158,6 +154,7 @@ def handle_message(phone, text):
             "7️⃣ Just vibes\n"
             "8️⃣ Friend"
         )
+
 
     if state == "GET_INTENT":
         intent = INTENT_MAP.get(msg)
