@@ -171,8 +171,9 @@ openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
 
 def get_matches(uid, limit=2):
     c = conn()
-    cur = c.cursor(dictionary=True)
+    cur = c.cursor(dictionary=True, buffered=True)  # ✅ buffered cursor
     try:
+        # fetch current user's profile
         cur.execute("""
             SELECT p.*, u.gender
             FROM profiles p
@@ -183,6 +184,7 @@ def get_matches(uid, limit=2):
         if not me:
             return []
 
+        # fetch all candidates
         cur.execute("""
             SELECT p.*, u.gender
             FROM profiles p
