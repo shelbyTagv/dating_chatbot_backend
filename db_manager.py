@@ -4,11 +4,8 @@ load_dotenv()
 import os
 import mysql.connector.pooling
 import random
-from openai import OpenAI
+from datetime import datetime
 
-# -------------------------------------------------
-# CONNECTION POOL
-# -------------------------------------------------
 _pool = None
 
 def conn():
@@ -16,7 +13,7 @@ def conn():
     if not _pool:
         _pool = mysql.connector.pooling.MySQLConnectionPool(
             pool_name="dating_pool",
-            pool_size=12,
+            pool_size=10,
             host=os.getenv("MYSQLHOST"),
             user=os.getenv("MYSQLUSER"),
             password=os.getenv("MYSQLPASSWORD"),
@@ -26,199 +23,111 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# INIT DB (DROP & CREATE TABLES)
+# INIT DB
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
-    try:
-        # Drop tables if they exist
-        cur.execute("DROP TABLE IF EXISTS profiles")
-        cur.execute("DROP TABLE IF EXISTS users")
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        phone VARCHAR(20) UNIQUE,
+        chat_state VARCHAR(20),
+        is_active BOOLEAN DEFAULT 0
+    )""")
 
-        # Create users table
-        cur.execute("""
-        CREATE TABLE users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            phone VARCHAR(20) UNIQUE NOT NULL,
-            gender VARCHAR(10),
-            chat_state VARCHAR(20),
-            is_active BOOLEAN DEFAULT 0,
-            subscription_expiry DATETIME
-        )
-        """)
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS profiles (
+        user_id INT PRIMARY KEY,
+        name VARCHAR(100),
+        age INT,
+        location VARCHAR(100),
+        intent VARCHAR(50),
+        preferred_gender VARCHAR(10),
+        age_min INT,
+        age_max INT,
+        contact_phone VARCHAR(20)
+    )""")
 
-        # Create profiles table with user_id as PRIMARY KEY (no duplicate)
-        cur.execute("""
-        CREATE TABLE profiles (
-            user_id INT PRIMARY KEY,
-            name VARCHAR(100),
-            age INT,
-            location VARCHAR(100),
-            intent VARCHAR(50),
-            preferred_gender VARCHAR(10),
-            age_min INT,
-            age_max INT,
-            contact_phone VARCHAR(20),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-        """)
-        c.commit()
-    finally:
-        cur.close()
-        c.close()
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS payments (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        reference VARCHAR(50),
+        poll_url TEXT,
+        status VARCHAR(20) DEFAULT 'PENDING',
+        created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+    )""")
+    c.commit()
+    cur.close()
+    c.close()
 
 # -------------------------------------------------
-# USER FUNCTIONS
+# PAYMENT FUNCTIONS
 # -------------------------------------------------
-def get_user_by_phone(phone):
+def create_payment(uid, ref, poll_url):
+    c = conn()
+    cur = c.cursor()
+    cur.execute(
+        "INSERT INTO payments (user_id, reference, poll_url) VALUES (%s,%s,%s)",
+        (uid, ref, poll_url)
+    )
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_pending_payments():
     c = conn()
     cur = c.cursor(dictionary=True)
-    try:
-        cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
-        return cur.fetchone()
-    finally:
-        cur.close()
-        c.close()
+    cur.execute("SELECT * FROM payments WHERE status='PENDING'")
+    rows = cur.fetchall()
+    cur.close()
+    c.close()
+    return rows
 
-def create_new_user(phone):
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    try:
-        cur.execute(
-            "INSERT INTO users (phone, chat_state) VALUES (%s,'NEW')",
-            (phone,)
-        )
-        c.commit()
-        cur.execute("SELECT * FROM users WHERE id=LAST_INSERT_ID()")
-        return cur.fetchone()
-    finally:
-        cur.close()
-        c.close()
-
-def set_state(uid, state):
+def mark_payment_paid(pid):
     c = conn()
     cur = c.cursor()
-    try:
-        cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, uid))
-        c.commit()
-    finally:
-        cur.close()
-        c.close()
+    cur.execute(
+        "UPDATE payments SET status='PAID' WHERE id=%s", (pid,)
+    )
+    c.commit()
+    cur.close()
+    c.close()
 
-def set_gender(uid, gender):
+def activate_user(uid):
     c = conn()
     cur = c.cursor()
-    try:
-        cur.execute("UPDATE users SET gender=%s WHERE id=%s", (gender, uid))
-        c.commit()
-    finally:
-        cur.close()
-        c.close()
+    cur.execute(
+        "UPDATE users SET is_active=1 WHERE id=%s", (uid,)
+    )
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_user_phone(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
+    phone = cur.fetchone()[0]
+    cur.close()
+    c.close()
+    return phone
 
 # -------------------------------------------------
-# PROFILE FUNCTIONS
+# MATCHING (UNCHANGED)
 # -------------------------------------------------
-def ensure_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    try:
-        cur.execute("""
-            INSERT INTO profiles (user_id)
-            VALUES (%s)
-            ON DUPLICATE KEY UPDATE user_id=user_id
-        """, (uid,))
-        c.commit()
-    finally:
-        cur.close()
-        c.close()
-
-def reset_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    try:
-        cur.execute("""
-            UPDATE profiles SET
-                name=NULL,
-                age=NULL,
-                location=NULL,
-                intent=NULL,
-                preferred_gender=NULL,
-                age_min=NULL,
-                age_max=NULL,
-                contact_phone=NULL
-            WHERE user_id=%s
-        """, (uid,))
-        c.commit()
-    finally:
-        cur.close()
-        c.close()
-
-def update_profile(uid, field, value):
-    c = conn()
-    cur = c.cursor()
-    try:
-        cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, uid))
-        c.commit()
-    finally:
-        cur.close()
-        c.close()
-
-# -------------------------------------------------
-# MATCHING
-# -------------------------------------------------
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
-
 def get_matches(uid, limit=2):
     c = conn()
-    cur = c.cursor(dictionary=True, buffered=True)  # ✅ buffered to avoid unread result
-    try:
-        # Fetch current user's profile
-        cur.execute("""
-            SELECT p.*, u.gender
-            FROM profiles p
-            JOIN users u ON u.id = p.user_id
-            WHERE p.user_id = %s
-        """, (uid,))
-        me = cur.fetchone()
-        if not me:
-            return []
-
-        # Fetch all other candidates
-        cur.execute("""
-            SELECT p.*, u.gender
-            FROM profiles p
-            JOIN users u ON u.id = p.user_id
-            WHERE p.user_id != %s
-              AND p.intent IS NOT NULL
-              AND p.age IS NOT NULL
-        """, (uid,))
-        candidates = cur.fetchall()
-    finally:
-        cur.close()
-        c.close()
-
-    if not candidates:
-        return []
-
-    # Format and randomize matches
-    data = []
-    for c in candidates:
-        data.append({
-            "id": c["user_id"],
-            "name": c["name"],
-            "age": c["age"],
-            "location": c["location"],
-            "intent": c["intent"],
-            "gender": c["gender"]
-        })
-
-    random.shuffle(data)
-    for d in data:
-        d["score"] = random.randint(50, 100)
-
-    return data[:limit]
-
-# -------------------------------------------------
-# CHATFLOW HELPERS
+    cur = c.cursor(dictionary=True)
+    cur.execute("""
+        SELECT p.*, u.phone
+        FROM profiles p
+        JOIN users u ON u.id=p.user_id
+        WHERE p.user_id!=%s AND p.contact_phone IS NOT NULL
+    """, (uid,))
+    rows = cur.fetchall()
+    random.shuffle(rows)
+    cur.close()
+    c.close()
+    return rows[:limit]
