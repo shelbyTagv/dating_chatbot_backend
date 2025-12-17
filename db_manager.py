@@ -5,6 +5,7 @@ import os
 import mysql.connector.pooling
 from datetime import datetime, timedelta
 import random
+from openai import OpenAI
 
 _pool = None
 
@@ -123,9 +124,6 @@ def create_profile(uid, name="", age=None, location="", intent="", preferred_gen
     c.close()
 
 def upsert_profile(uid, field, value):
-    """
-    Append-only: if last profile has empty field, update it; else create new row.
-    """
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
@@ -144,8 +142,11 @@ def upsert_profile(uid, field, value):
     c.close()
 
 # -------------------------------------------------
-# MATCHMAKING
+# AI MATCHMAKING
 # -------------------------------------------------
+OPENAI_KEY = os.getenv("OPENAI_API_KEY")
+openai_client = OpenAI(api_key=OPENAI_KEY)
+
 def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -163,24 +164,7 @@ def get_matches(uid, limit=2):
     if not me:
         return []
 
-    my_gender = (me.get("my_gender") or "any").lower()
-    my_age = me.get("age") or 0
-    my_intent = (me.get("intent") or "").lower()
-    my_pref_gender = (me.get("preferred_gender") or "any").lower()
-
-    intent_pairs = {
-        "girlfriend": "boyfriend",
-        "boyfriend": "girlfriend",
-        "sugar mummy": "benten",
-        "benten": "sugar mummy",
-        "sugar daddy": "sugar baby",
-        "sugar baby": "sugar daddy",
-        "1 night stand": "1 night stand",
-        "friend": "friend",
-        "just vibes": "just vibes"
-    }
-
-    # Fetch all candidates
+    # Fetch all other candidates
     cur.execute("""
         SELECT p.*, u.gender as user_gender, u.id as user_id
         FROM profiles p
@@ -191,31 +175,80 @@ def get_matches(uid, limit=2):
     cur.close()
     c.close()
 
-    matches = []
-    for c in candidates:
-        cand_age_min = c.get("age_min") or 0
-        cand_age_max = c.get("age_max") or 100
-        cand_intent = (c.get("intent") or "").lower()
-        cand_gender = (c.get("user_gender") or "any").lower()
-        cand_pref_gender = (c.get("preferred_gender") or "any").lower()
+    if not candidates:
+        return []
 
-        if not (cand_age_min <= my_age <= cand_age_max):
-            continue
-        if intent_pairs.get(my_intent) != cand_intent:
-            continue
-        if my_pref_gender != "any" and cand_gender != my_pref_gender:
-            continue
-        if cand_pref_gender != "any" and my_gender != cand_pref_gender:
-            continue
+    # Prepare data for AI
+    user_data = {
+        "name": me.get("name"),
+        "age": me.get("age"),
+        "gender": me.get("my_gender"),
+        "intent": me.get("intent"),
+        "preferred_gender": me.get("preferred_gender"),
+        "location": me.get("location")
+    }
 
-        matches.append(c)
+    candidate_data = []
+    for cand in candidates:
+        candidate_data.append({
+            "id": cand["user_id"],
+            "name": cand.get("name"),
+            "age": cand.get("age"),
+            "gender": cand.get("user_gender"),
+            "intent": cand.get("intent"),
+            "preferred_gender": cand.get("preferred_gender"),
+            "location": cand.get("location")
+        })
 
-    random.shuffle(matches)
-    limited_matches = matches[:limit]
-    for m in limited_matches:
-        m["more_available"] = len(matches) > limit
+    # Build prompt for AI
+    prompt = f"""
+    You are an AI matchmaking assistant.
 
-    return limited_matches
+    User profile:
+    {user_data}
+
+    Candidate profiles:
+    {candidate_data}
+
+    Based on the user's gender, intent, preferred_gender, and age, rank the candidates in order of best match.
+    Only return a JSON list with objects containing "id" and "score" (0-100) for compatibility.
+    """
+
+    try:
+        response = openai_client.chat.completions.create(
+            model="gpt-4.1-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0
+        )
+        result_text = response.choices[0].message.content
+    except Exception as e:
+        print("AI error:", e)
+        # fallback to random matching
+        random.shuffle(candidate_data)
+        return candidate_data[:limit]
+
+    import json
+    try:
+        scores = json.loads(result_text)
+    except Exception as e:
+        print("AI JSON parse error:", e)
+        # fallback to random matching
+        random.shuffle(candidate_data)
+        return candidate_data[:limit]
+
+    # Merge scores with candidate info
+    for c in candidate_data:
+        for s in scores:
+            if s["id"] == c["id"]:
+                c["score"] = s["score"]
+
+    candidate_data.sort(key=lambda x: x.get("score", 0), reverse=True)
+
+    top_matches = candidate_data[:limit]
+    for m in top_matches:
+        m["more_available"] = len(candidate_data) > limit
+
+    return top_matches
 
 # -------------------------------------------------
 # TRANSACTIONS
