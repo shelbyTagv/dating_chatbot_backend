@@ -5,8 +5,8 @@ import os
 import time
 import hashlib
 import requests
-from fastapi import FastAPI, Request
-from fastapi.responses import PlainTextResponse
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse, PlainTextResponse
 import db_manager
 
 app = FastAPI()
@@ -14,9 +14,10 @@ app = FastAPI()
 # -------------------------------------------------
 # ENV CONFIG
 # -------------------------------------------------
-GREEN_API_URL = os.getenv("GREEN_API_URL")  # e.g. https://api.green-api.com
+GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
-API_TOKEN = os.getenv("API_TOKEN")
+API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
+GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 
 PAYNOW_INIT_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
 PAYNOW_ID = os.getenv("PAYNOW_ID")
@@ -28,56 +29,21 @@ PAYMENT_AMOUNT = "2.00"
 # STARTUP
 # -------------------------------------------------
 @app.on_event("startup")
-def start():
+def startup():
     db_manager.init_db()
 
 # -------------------------------------------------
-# WHATSAPP SENDERS
+# SEND WHATSAPP MESSAGE
 # -------------------------------------------------
-def send_text(phone: str, text: str):
-    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN}"
-    payload = {
-        "chatId": f"{phone}@c.us",
-        "message": text
-    }
-    r = requests.post(url, json=payload, timeout=15)
-    print("SEND_TEXT:", r.status_code, r.text)
-
-
-def send_buttons(phone: str, text: str, buttons: list):
-    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendButtons/{API_TOKEN}"
-    payload = {
-        "chatId": f"{phone}@c.us",
-        "message": text,
-        "buttons": buttons
-    }
-    r = requests.post(url, json=payload, timeout=15)
-    print("SEND_BUTTONS:", r.status_code, r.text)
+def send_whatsapp_message(phone: str, text: str):
+    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
+    payload = {"chatId": f"{phone}@c.us", "message": text}
+    requests.post(url, json=payload, timeout=15)
 
 # -------------------------------------------------
 # CONSTANTS
 # -------------------------------------------------
-INTENTS = [
-    ("1", "Sugar mummy"),
-    ("2", "Sugar daddy"),
-    ("3", "Benten"),
-    ("4", "Girlfriend"),
-    ("5", "Boyfriend"),
-    ("6", "1 night stand"),
-    ("7", "Just vibes"),
-    ("8", "Friend"),
-]
-
-AGE_RANGES = [
-    ("1", "18-25"),
-    ("2", "26-30"),
-    ("3", "31-35"),
-    ("4", "36-40"),
-    ("5", "41-50"),
-    ("6", "50+"),
-]
-
-INTENT_VALUE = {
+INTENT_MAP = {
     "1": "sugar mummy",
     "2": "sugar daddy",
     "3": "benten",
@@ -88,7 +54,7 @@ INTENT_VALUE = {
     "8": "friend",
 }
 
-AGE_VALUE = {
+AGE_MAP = {
     "1": (18, 25),
     "2": (26, 30),
     "3": (31, 35),
@@ -105,181 +71,182 @@ def infer_gender(intent):
     return "any"
 
 # -------------------------------------------------
-# WEBHOOK
+# WEBHOOK VERIFY
+# -------------------------------------------------
+@app.get("/webhook")
+async def verify_webhook(request: Request):
+    return PlainTextResponse("OK")
+
+# -------------------------------------------------
+# INCOMING WEBHOOK (WORKING FORMAT)
 # -------------------------------------------------
 @app.post("/webhook")
-async def webhook(req: Request):
-    data = await req.json()
-    print("WEBHOOK DATA:", data)
+async def webhook(request: Request):
+    auth = request.headers.get("Authorization")
+    if GREEN_API_AUTH_TOKEN and (not auth or auth.replace("Bearer ", "") != GREEN_API_AUTH_TOKEN):
+        raise HTTPException(status_code=401)
 
-    # ---- SAFE MESSAGE EXTRACTION (GREEN API) ----
-    msg = (
-        data.get("messageData", {})
-            .get("textMessageData", {})
-            .get("textMessage", "")
-    ).strip()
+    payload = await request.json()
+    if payload.get("typeWebhook") != "incomingMessageReceived":
+        return JSONResponse({"status": "ignored"})
 
-    phone = data.get("senderData", {}).get("sender", "")
+    sender = payload.get("senderData", {})
+    message_data = payload.get("messageData", {})
 
-    if not msg or not phone:
-        return PlainTextResponse("OK")
+    raw_chat_id = sender.get("chatId", "")
+    phone = raw_chat_id.split("@")[0]
+
+    text = ""
+    if "textMessageData" in message_data:
+        text = message_data["textMessageData"].get("textMessage", "").strip()
+    elif "extendedTextMessageData" in message_data:
+        text = message_data["extendedTextMessageData"].get("text", "").strip()
+
+    if not phone or not text:
+        return JSONResponse({"status": "no-text"})
+
+    reply = handle_message(phone, text)
+    send_whatsapp_message(phone, reply)
+    return JSONResponse({"status": "processed"})
+
+# -------------------------------------------------
+# CHAT LOGIC (NEW FLOW, WORKING)
+# -------------------------------------------------
+def handle_message(phone: str, text: str) -> str:
+    msg = text.strip()
+    msg_l = msg.lower()
 
     user = db_manager.get_or_create_user(phone)
     uid = user["id"]
     state = user["chat_state"]
 
-    msg_lower = msg.lower()
+    if msg_l == "exit":
+        db_manager.reset_user(uid)
+        return "❌ Conversation ended.\nType HELLO to start again."
 
-    # -------------------------------------------------
-    # EXIT
-    # -------------------------------------------------
-    if msg_lower == "exit":
-        db_manager.set_state(uid, "WELCOME")
-        send_text(phone, "Conversation ended. Type HELLO to restart.")
-        return PlainTextResponse("OK")
-
-    # -------------------------------------------------
-    # WELCOME
-    # -------------------------------------------------
-    if state == "NEW" or state == "WELCOME":
-        db_manager.set_state(uid, "INTENT")
-        send_text(
-            phone,
-            "Welcome to Shelby Date Connections 💕\n\n"
-            "• Fill in your details\n"
-            "• View matches\n"
-            "• Pay $2 to unlock contacts\n\n"
-            "Type HELLO to begin."
+    if state == "NEW":
+        db_manager.update_chat_state(uid, "WELCOME")
+        return (
+            "Welcome to Shelby Date Connections ❤️\n\n"
+            "1️⃣ Fill in your details & preferences\n"
+            "2️⃣ View 2 matches\n"
+            "3️⃣ Pay $2 to unlock contacts\n"
+            "4️⃣ Your privacy is our concern\n\n"
+            "Type HELLO to start or EXIT anytime."
         )
-        return PlainTextResponse("OK")
 
-    # -------------------------------------------------
-    # START
-    # -------------------------------------------------
-    if state == "INTENT":
-        if msg_lower != "hello":
-            send_text(phone, "Please type HELLO to continue.")
-            return PlainTextResponse("OK")
+    if state == "WELCOME":
+        if msg_l != "hello":
+            return "Please type HELLO to continue."
+        db_manager.update_chat_state(uid, "GET_INTENT")
+        return (
+            "What are you looking for?\n\n"
+            "1️⃣ Sugar mummy\n"
+            "2️⃣ Sugar daddy\n"
+            "3️⃣ Benten\n"
+            "4️⃣ Girlfriend\n"
+            "5️⃣ Boyfriend\n"
+            "6️⃣ 1 night stand\n"
+            "7️⃣ Just vibes\n"
+            "8️⃣ Friend"
+        )
 
-        buttons = [{"id": k, "text": v} for k, v in INTENTS]
-        db_manager.set_state(uid, "GET_INTENT")
-        send_buttons(phone, "What are you looking for?", buttons)
-        return PlainTextResponse("OK")
-
-    # -------------------------------------------------
-    # GET INTENT
-    # -------------------------------------------------
     if state == "GET_INTENT":
-        intent = INTENT_VALUE.get(msg)
+        intent = INTENT_MAP.get(msg)
         if not intent:
-            send_text(phone, "Please choose using the buttons.")
-            return PlainTextResponse("OK")
+            return "Please reply with a number (1–8)."
+        db_manager.update_profile_field(uid, "intent", intent)
+        db_manager.update_profile_field(uid, "preferred_gender", infer_gender(intent))
+        db_manager.update_chat_state(uid, "GET_AGE_RANGE")
+        return (
+            "Preferred age range:\n\n"
+            "1️⃣ 18-25\n"
+            "2️⃣ 26-30\n"
+            "3️⃣ 31-35\n"
+            "4️⃣ 36-40\n"
+            "5️⃣ 41-50\n"
+            "6️⃣ 50+"
+        )
 
-        db_manager.upsert_profile(uid, "intent", intent)
-        db_manager.set_gender(uid, infer_gender(intent))
-        db_manager.set_state(uid, "GET_AGE_RANGE")
-
-        buttons = [{"id": k, "text": v} for k, v in AGE_RANGES]
-        send_buttons(phone, "Preferred age range:", buttons)
-        return PlainTextResponse("OK")
-
-    # -------------------------------------------------
-    # AGE RANGE
-    # -------------------------------------------------
     if state == "GET_AGE_RANGE":
-        r = AGE_VALUE.get(msg)
+        r = AGE_MAP.get(msg)
         if not r:
-            send_text(phone, "Please select an age range using buttons.")
-            return PlainTextResponse("OK")
+            return "Choose a valid age range (1–6)."
+        db_manager.update_profile_field(uid, "age_min", r[0])
+        db_manager.update_profile_field(uid, "age_max", r[1])
+        db_manager.update_chat_state(uid, "GET_NAME")
+        return "Your name?"
 
-        db_manager.upsert_profile(uid, "age_min", r[0])
-        db_manager.upsert_profile(uid, "age_max", r[1])
-        db_manager.set_state(uid, "GET_NAME")
-        send_text(phone, "Your name:")
-        return PlainTextResponse("OK")
-
-    # -------------------------------------------------
-    # NAME
-    # -------------------------------------------------
     if state == "GET_NAME":
-        db_manager.upsert_profile(uid, "name", msg)
-        db_manager.set_state(uid, "GET_AGE")
-        send_text(phone, "Your age:")
-        return PlainTextResponse("OK")
+        db_manager.update_profile_field(uid, "name", msg)
+        db_manager.update_chat_state(uid, "GET_AGE")
+        return "Your age?"
 
-    # -------------------------------------------------
-    # AGE
-    # -------------------------------------------------
     if state == "GET_AGE":
         if not msg.isdigit():
-            send_text(phone, "Please enter a valid number.")
-            return PlainTextResponse("OK")
+            return "Please enter a valid age."
+        db_manager.update_profile_field(uid, "age", int(msg))
+        db_manager.update_chat_state(uid, "GET_LOCATION")
+        return "Your location?"
 
-        db_manager.upsert_profile(uid, "age", int(msg))
-        db_manager.set_state(uid, "GET_LOCATION")
-        send_text(phone, "Your location:")
-        return PlainTextResponse("OK")
-
-    # -------------------------------------------------
-    # LOCATION
-    # -------------------------------------------------
     if state == "GET_LOCATION":
-        db_manager.upsert_profile(uid, "location", msg)
-        db_manager.set_state(uid, "GET_PHOTO")
-        send_text(phone, "Send a photo (or type SKIP):")
-        return PlainTextResponse("OK")
+        db_manager.update_profile_field(uid, "location", msg)
+        db_manager.update_chat_state(uid, "GET_PHONE")
+        return "Your phone number?"
 
-    # -------------------------------------------------
-    # PHOTO
-    # -------------------------------------------------
-    if state == "GET_PHOTO":
-        if msg_lower != "skip":
-            db_manager.upsert_profile(uid, "photo_url", msg)
-        db_manager.set_state(uid, "GET_PHONE")
-        send_text(phone, "Your contact phone number:")
-        return PlainTextResponse("OK")
-
-    # -------------------------------------------------
-    # PHONE + MATCHES
-    # -------------------------------------------------
     if state == "GET_PHONE":
-        db_manager.upsert_profile(uid, "contact_phone", msg)
+        db_manager.update_profile_field(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
 
         if not matches:
-            send_text(phone, "No matches found yet. Try again later.")
-            return PlainTextResponse("OK")
+            return "No matches found yet. Try again later."
 
-        text = "🔥 Top Matches:\n\n"
+        preview = "🔥 Top Matches:\n\n"
         for m in matches:
-            text += f"{m['name']} ({m['age']}) – {m['location']} [{m['intent']}]\n"
+            preview += f"{m['name']} ({m['age']}) – {m['location']} [{m['intent']}]\n"
 
-        db_manager.set_state(uid, "PAY")
-        send_text(phone, text + "\n💳 Pay $2 to unlock contacts.")
-        return PlainTextResponse("OK")
+        db_manager.update_chat_state(uid, "PAY")
+        return preview + "\n💳 Pay $2 to unlock contacts."
 
-    # -------------------------------------------------
-    # PAY
-    # -------------------------------------------------
     if state == "PAY":
-        ref = f"PAY-{uid}-{int(time.time())}"
-        hash_str = f"{PAYNOW_ID}{ref}{PAYMENT_AMOUNT}Unlock{BASE_URL}/paid{BASE_URL}/ipn{PAYNOW_KEY}"
-        hash_val = hashlib.sha512(hash_str.encode()).hexdigest().upper()
+        reference = f"PAY-{uid}-{int(time.time())}"
+        auth_string = f"{PAYNOW_ID}{reference}{PAYMENT_AMOUNT}Unlock{BASE_URL}/paid{BASE_URL}/paynow/ipn{PAYNOW_KEY}"
+        hash_val = hashlib.sha512(auth_string.encode()).hexdigest().upper()
 
-        res = requests.post(PAYNOW_INIT_URL, data={
-            "id": PAYNOW_ID,
-            "reference": ref,
-            "amount": PAYMENT_AMOUNT,
-            "additionalinfo": "Unlock",
-            "returnurl": f"{BASE_URL}/paid",
-            "resulturl": f"{BASE_URL}/ipn",
-            "status": "Message",
-            "hash": hash_val
-        })
+        res = requests.post(
+            PAYNOW_INIT_URL,
+            data={
+                "id": PAYNOW_ID,
+                "reference": reference,
+                "amount": PAYMENT_AMOUNT,
+                "additionalinfo": "Unlock",
+                "returnurl": f"{BASE_URL}/paid",
+                "resulturl": f"{BASE_URL}/paynow/ipn",
+                "status": "Message",
+                "hash": hash_val,
+            },
+            timeout=15,
+        )
 
-        poll = res.text.split("pollurl=")[-1]
-        db_manager.create_tx(uid, ref, poll)
-        send_text(phone, f"Complete payment here:\n{poll}")
-        return PlainTextResponse("OK")
+        poll_url = res.text.split("pollurl=")[-1].strip()
+        db_manager.create_transaction(uid, reference, poll_url, PAYMENT_AMOUNT)
+        return f"👉 Pay here:\n{poll_url}"
+
+    return "Type EXIT to restart."
+
+# -------------------------------------------------
+# PAYNOW IPN
+# -------------------------------------------------
+@app.post("/paynow/ipn")
+async def paynow_ipn(request: Request):
+    data = await request.form()
+    reference = data.get("reference")
+    status = data.get("status")
+
+    if status and status.lower() == "paid":
+        tx = db_manager.get_transaction_by_reference(reference)
+        if tx:
+            db_manager.mark_transaction_paid(tx["id"])
+            db_manager.unlock_full_profiles(tx["user_id"])
 
     return PlainTextResponse("OK")
