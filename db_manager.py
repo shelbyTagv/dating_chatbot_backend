@@ -2,15 +2,14 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import mysql.connector
-from mysql.connector import pooling
+import mysql.connector.pooling
 from datetime import datetime, timedelta
 
 _pool = None
 
-def get_pool():
+def conn():
     global _pool
-    if _pool is None:
+    if not _pool:
         _pool = mysql.connector.pooling.MySQLConnectionPool(
             pool_name="dating_pool",
             pool_size=5,
@@ -20,19 +19,12 @@ def get_pool():
             database=os.getenv("MYSQL_DATABASE"),
             port=int(os.getenv("MYSQL_PORT", 3306)),
         )
-    return _pool
+    return _pool.get_connection()
 
-def conn():
-    return get_pool().get_connection()
-
-# -------------------------------------------------
-# INIT DB
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
-
-    cur.execute("DROP TABLE IF EXISTS feedback")
     cur.execute("DROP TABLE IF EXISTS transactions")
     cur.execute("DROP TABLE IF EXISTS profiles")
     cur.execute("DROP TABLE IF EXISTS users")
@@ -42,10 +34,9 @@ def init_db():
         id INT AUTO_INCREMENT PRIMARY KEY,
         phone VARCHAR(20) UNIQUE,
         gender VARCHAR(10),
-        chat_state VARCHAR(50),
+        chat_state VARCHAR(20),
         is_active BOOLEAN DEFAULT 0,
-        subscription_expiry DATETIME,
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+        subscription_expiry DATETIME
     )
     """)
 
@@ -58,7 +49,6 @@ def init_db():
         intent VARCHAR(50),
         age_min INT,
         age_max INT,
-        photo_url TEXT,
         contact_phone VARCHAR(20),
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
@@ -70,16 +60,8 @@ def init_db():
         user_id INT,
         reference VARCHAR(100),
         poll_url TEXT,
+        amount DECIMAL(5,2),
         status VARCHAR(20),
-        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
-    )
-    """)
-
-    cur.execute("""
-    CREATE TABLE feedback (
-        id INT AUTO_INCREMENT PRIMARY KEY,
-        user_id INT,
-        message TEXT,
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
@@ -88,8 +70,6 @@ def init_db():
     cur.close()
     c.close()
 
-# -------------------------------------------------
-# USERS
 # -------------------------------------------------
 def get_or_create_user(phone):
     c = conn()
@@ -97,10 +77,7 @@ def get_or_create_user(phone):
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
     u = cur.fetchone()
     if not u:
-        cur.execute(
-            "INSERT INTO users (phone, chat_state) VALUES (%s,'WELCOME')",
-            (phone,)
-        )
+        cur.execute("INSERT INTO users (phone,chat_state) VALUES (%s,'NEW')", (phone,))
         c.commit()
         cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
         u = cur.fetchone()
@@ -108,7 +85,7 @@ def get_or_create_user(phone):
     c.close()
     return u
 
-def set_state(uid, state):
+def update_chat_state(uid, state):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, uid))
@@ -116,7 +93,16 @@ def set_state(uid, state):
     cur.close()
     c.close()
 
-def set_gender(uid, gender):
+def reset_user(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("DELETE FROM profiles WHERE user_id=%s", (uid,))
+    cur.execute("UPDATE users SET chat_state='NEW' WHERE id=%s", (uid,))
+    c.commit()
+    cur.close()
+    c.close()
+
+def update_gender(uid, gender):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET gender=%s WHERE id=%s", (gender, uid))
@@ -124,10 +110,7 @@ def set_gender(uid, gender):
     cur.close()
     c.close()
 
-# -------------------------------------------------
-# PROFILE
-# -------------------------------------------------
-def upsert_profile(uid, field, value):
+def update_profile_field(uid, field, value):
     c = conn()
     cur = c.cursor()
     cur.execute("INSERT IGNORE INTO profiles (user_id) VALUES (%s)", (uid,))
@@ -137,53 +120,17 @@ def upsert_profile(uid, field, value):
     c.close()
 
 # -------------------------------------------------
-# MATCHING
-# -------------------------------------------------
-INTENT_MAP = {
-    "boyfriend": ("male", "girlfriend"),
-    "girlfriend": ("female", "boyfriend"),
-    "sugar mummy": ("female", "benten"),
-    "benten": ("male", "sugar mummy"),
-    "1 night stand": ("any", "1 night stand"),
-    "just vibes": ("any", "just vibes"),
-    "friend": ("any", "friend"),
-}
-
 def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
 
     cur.execute("""
-    SELECT u.gender, p.*
-    FROM users u JOIN profiles p ON u.id=p.user_id
-    WHERE u.id=%s
-    """, (uid,))
-    me = cur.fetchone()
-    if not me:
-        return []
-
-    my_gender, target_intent = INTENT_MAP.get(me["intent"], ("any", me["intent"]))
-
-    cur.execute("""
-    SELECT p.name,p.age,p.location,p.intent,p.photo_url,u.id
+    SELECT p.*
     FROM profiles p
     JOIN users u ON u.id=p.user_id
     WHERE u.id!=%s
-      AND p.intent=%s
-      AND p.age BETWEEN %s AND %s
-      AND (%s='any' OR u.gender=%s)
-    ORDER BY ABS(p.age-%s)
     LIMIT %s
-    """, (
-        uid,
-        target_intent,
-        me["age_min"],
-        me["age_max"],
-        my_gender,
-        my_gender,
-        me["age"],
-        limit
-    ))
+    """, (uid, limit))
 
     res = cur.fetchall()
     cur.close()
@@ -191,40 +138,25 @@ def get_matches(uid, limit=2):
     return res
 
 # -------------------------------------------------
-# PAYMENTS
-# -------------------------------------------------
-def create_tx(uid, ref, poll):
+def create_transaction(uid, ref, poll, amount):
     c = conn()
     cur = c.cursor()
     cur.execute("""
-    INSERT INTO transactions (user_id,reference,poll_url,status)
-    VALUES (%s,%s,%s,'PENDING')
-    """, (uid, ref, poll))
+    INSERT INTO transactions (user_id,reference,poll_url,amount,status)
+    VALUES (%s,%s,%s,%s,'PENDING')
+    """, (uid, ref, poll, amount))
     c.commit()
     cur.close()
     c.close()
 
-def mark_paid(ref):
+def mark_transaction_paid(ref):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE transactions SET status='PAID' WHERE reference=%s", (ref,))
     cur.execute("""
-        UPDATE users SET is_active=1,
-        subscription_expiry=%s WHERE id=(
-            SELECT user_id FROM transactions WHERE reference=%s
-        )
+    UPDATE users SET is_active=1, subscription_expiry=%s
+    WHERE id=(SELECT user_id FROM transactions WHERE reference=%s)
     """, (datetime.utcnow()+timedelta(days=1), ref))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# FEEDBACK
-# -------------------------------------------------
-def save_feedback(uid, text):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("INSERT INTO feedback (user_id,message) VALUES (%s,%s)", (uid,text))
     c.commit()
     cur.close()
     c.close()
