@@ -6,7 +6,7 @@ import mysql.connector.pooling
 from datetime import datetime, timedelta
 import random
 import json
-from openai import OpenAI, OpenAIError
+from openai import OpenAI
 
 _pool = None
 
@@ -33,6 +33,7 @@ def conn():
 def init_db():
     c = conn()
     cur = c.cursor()
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -43,6 +44,7 @@ def init_db():
         subscription_expiry DATETIME
     )
     """)
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS profiles (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -58,6 +60,7 @@ def init_db():
         FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
     )
     """)
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS transactions (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -69,18 +72,30 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
+
     c.commit()
     cur.close()
     c.close()
 
 # ------------------------------
-# USER MANAGEMENT (OPTION 1)
+# USER MANAGEMENT
 # ------------------------------
-def create_new_user(phone, gender=None):
-    """Always create a new user row per conversation attempt"""
+def get_user_by_phone(phone):
     c = conn()
     cur = c.cursor(dictionary=True)
-    cur.execute("INSERT INTO users (phone, gender, chat_state) VALUES (%s,%s,'NEW')", (phone, gender))
+    cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
+    user = cur.fetchone()
+    cur.close()
+    c.close()
+    return user
+
+def create_new_user(phone, gender=None):
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute(
+        "INSERT INTO users (phone, gender, chat_state) VALUES (%s,%s,'NEW')",
+        (phone, gender)
+    )
     c.commit()
     cur.execute("SELECT * FROM users WHERE id=LAST_INSERT_ID()")
     user = cur.fetchone()
@@ -107,122 +122,94 @@ def set_gender(uid, gender):
 # ------------------------------
 # PROFILE MANAGEMENT
 # ------------------------------
-def create_profile(uid, name="", age=None, location="", intent="", preferred_gender="any", age_min=None, age_max=None, contact_phone=""):
-    """Create a profile linked to a unique user_id"""
+def create_profile(uid):
     c = conn()
     cur = c.cursor()
-    cur.execute("""
-        INSERT INTO profiles (user_id, name, age, location, intent, preferred_gender, age_min, age_max, contact_phone)
-        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
-    """, (uid, name, age, location, intent, preferred_gender, age_min, age_max, contact_phone))
+    cur.execute("INSERT INTO profiles (user_id) VALUES (%s)", (uid,))
     c.commit()
     cur.close()
     c.close()
 
 def update_profile(uid, field, value):
-    """Update the latest profile of the given user_id"""
     c = conn()
     cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
-    profile = cur.fetchone()
-    if profile:
-        cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
+    cur.execute(
+        "SELECT id FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1",
+        (uid,)
+    )
+    p = cur.fetchone()
+    if p:
+        cur.execute(
+            f"UPDATE profiles SET {field}=%s WHERE id=%s",
+            (value, p["id"])
+        )
         c.commit()
     cur.close()
     c.close()
 
 # ------------------------------
-# AI MATCHMAKING
+# MATCHMAKING
 # ------------------------------
-OPENAI_KEY = os.getenv("OPENAI_API_KEY")
-openai_client = OpenAI(api_key=OPENAI_KEY) if OPENAI_KEY else None
+openai_client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 def get_matches(uid, limit=2):
-    """Return top matches from existing profiles excluding the current user"""
     c = conn()
     cur = c.cursor(dictionary=True)
+
     cur.execute("""
-        SELECT u.gender as my_gender, u.id as user_id, p.*
+        SELECT u.gender AS my_gender, p.*
         FROM profiles p
         JOIN users u ON u.id = p.user_id
         WHERE u.id=%s
         ORDER BY p.id DESC LIMIT 1
     """, (uid,))
     me = cur.fetchone()
+
     if not me:
         cur.close()
         c.close()
         return []
 
     cur.execute("""
-        SELECT p.*, u.gender as user_gender, u.id as user_id
+        SELECT p.*, u.gender AS user_gender, u.id AS user_id
         FROM profiles p
         JOIN users u ON u.id = p.user_id
         WHERE u.id != %s
     """, (uid,))
     candidates = cur.fetchall()
+
     cur.close()
     c.close()
+
     if not candidates:
         return []
 
-    candidate_data = [{
+    data = [{
         "id": c["user_id"],
-        "name": c.get("name"),
-        "age": c.get("age"),
-        "gender": c.get("user_gender"),
-        "intent": c.get("intent"),
-        "preferred_gender": c.get("preferred_gender"),
-        "location": c.get("location")
+        "name": c["name"],
+        "age": c["age"],
+        "gender": c["user_gender"],
+        "intent": c["intent"],
+        "preferred_gender": c["preferred_gender"],
+        "location": c["location"],
+        "score": random.randint(50, 100)
     } for c in candidates]
 
-    if not openai_client:
-        random.shuffle(candidate_data)
-        for i in candidate_data:
-            i["score"] = random.randint(50, 100)
-        return candidate_data[:limit]
+    data.sort(key=lambda x: x["score"], reverse=True)
 
-    prompt = f"""
-    You are an AI matchmaking assistant.
-    User profile: {me}
-    Candidate profiles: {candidate_data}
-    Rank candidates by best match based on gender, intent, preferred_gender, and age.
-    Return JSON list of objects with "id" and "score" (0-100).
-    """
+    for m in data[:limit]:
+        m["more_available"] = len(data) > limit
 
-    try:
-        resp = openai_client.chat.completions.create(
-            model="gpt-4.1-mini",
-            messages=[{"role":"user","content":prompt}],
-            temperature=0
-        )
-        scores = json.loads(resp.choices[0].message.content)
-    except Exception:
-        random.shuffle(candidate_data)
-        for i in candidate_data:
-            i["score"] = random.randint(50, 100)
-        return candidate_data[:limit]
-
-    for c in candidate_data:
-        for s in scores:
-            if s["id"] == c["id"]:
-                c["score"] = s["score"]
-
-    candidate_data.sort(key=lambda x: x.get("score",0), reverse=True)
-    top_matches = candidate_data[:limit]
-    for m in top_matches:
-        m["more_available"] = len(candidate_data) > limit
-
-    return top_matches
+    return data[:limit]
 
 # ------------------------------
-# TRANSACTIONS
+# PAYMENTS
 # ------------------------------
 def create_tx(uid, ref, poll, amount):
     c = conn()
     cur = c.cursor()
     cur.execute("""
-        INSERT INTO transactions (user_id,reference,poll_url,amount,status)
+        INSERT INTO transactions (user_id, reference, poll_url, amount, status)
         VALUES (%s,%s,%s,%s,'PENDING')
     """, (uid, ref, poll, amount))
     c.commit()
@@ -234,9 +221,10 @@ def mark_paid(ref):
     cur = c.cursor()
     cur.execute("UPDATE transactions SET status='PAID' WHERE reference=%s", (ref,))
     cur.execute("""
-        UPDATE users SET is_active=1, subscription_expiry=%s
+        UPDATE users
+        SET is_active=1, subscription_expiry=%s
         WHERE id=(SELECT user_id FROM transactions WHERE reference=%s)
-    """, (datetime.utcnow()+timedelta(days=1), ref))
+    """, (datetime.utcnow() + timedelta(days=1), ref))
     c.commit()
     cur.close()
     c.close()
