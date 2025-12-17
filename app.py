@@ -159,7 +159,10 @@ def handle_message(phone, text):
 
     if state == "PAY":
         if msg == "pay":
-            link = create_paynow_payment(uid, phone)
+            try:
+                link = create_paynow_payment(uid, phone)
+            except Exception as e:
+                return f"❌ Payment initiation failed. Please try again later."
             return f"💳 Pay via EcoCash:\n{link}\n\n⏳ Waiting for confirmation..."
         return "💰 Reply *PAY* to unlock contact details."
 
