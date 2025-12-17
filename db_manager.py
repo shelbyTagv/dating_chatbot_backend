@@ -111,7 +111,7 @@ def set_gender(uid, gender):
 # -------------------------------------------------
 # PROFILE MANAGEMENT
 # -------------------------------------------------
-def create_profile(uid, name="", age=None, location="", intent="", preferred_gender=None, age_min=None, age_max=None, contact_phone=""):
+def create_profile(uid, name="", age=None, location="", intent="", preferred_gender="any", age_min=None, age_max=None, contact_phone=""):
     c = conn()
     cur = c.cursor()
     cur.execute("""
@@ -150,6 +150,7 @@ def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
 
+    # Fetch current user's latest profile
     cur.execute("""
         SELECT u.gender as my_gender, u.id as user_id, p.*
         FROM profiles p
@@ -179,16 +180,12 @@ def get_matches(uid, limit=2):
         "just vibes": "just vibes"
     }
 
+    # Fetch all candidates
     cur.execute("""
         SELECT p.*, u.gender as user_gender, u.id as user_id
         FROM profiles p
         JOIN users u ON u.id = p.user_id
         WHERE u.id != %s
-          AND p.age_min IS NOT NULL
-          AND p.age_max IS NOT NULL
-          AND p.intent IS NOT NULL
-          AND p.preferred_gender IS NOT NULL
-          AND u.gender IS NOT NULL
     """, (uid,))
     candidates = cur.fetchall()
     cur.close()
@@ -196,11 +193,11 @@ def get_matches(uid, limit=2):
 
     matches = []
     for c in candidates:
-        cand_age_min = c["age_min"]
-        cand_age_max = c["age_max"]
-        cand_intent = (c["intent"] or "").lower()
-        cand_gender = (c["user_gender"] or "any").lower()
-        cand_pref_gender = (c["preferred_gender"] or "any").lower()
+        cand_age_min = c.get("age_min") or 0
+        cand_age_max = c.get("age_max") or 100
+        cand_intent = (c.get("intent") or "").lower()
+        cand_gender = (c.get("user_gender") or "any").lower()
+        cand_pref_gender = (c.get("preferred_gender") or "any").lower()
 
         if not (cand_age_min <= my_age <= cand_age_max):
             continue
