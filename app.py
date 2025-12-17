@@ -108,7 +108,7 @@ def handle_message(phone, text):
     # ------------------------------
     user = db_manager.get_user_by_phone(phone)
     if not user:
-        user = db_manager.create_user(phone)
+        user = db_manager.create_new_user(phone)
 
     uid = user["id"]
 
@@ -128,6 +128,7 @@ def handle_message(phone, text):
     # FLOW
     # ------------------------------
     if state == "NEW":
+        db_manager.reset_profile(uid)  # ✅ reset profile on new flow
         db_manager.set_state(uid, "GET_GENDER")
         return (
             "👋 Welcome!\n\n"
