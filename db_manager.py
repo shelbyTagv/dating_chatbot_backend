@@ -7,6 +7,9 @@ from datetime import datetime, timedelta
 
 _pool = None
 
+# -------------------------------------------------
+# DATABASE CONNECTION
+# -------------------------------------------------
 def conn():
     global _pool
     if not _pool:
@@ -22,13 +25,18 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
+# INITIALIZE DATABASE
+# -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
+    cur.execute("DROP TABLE IF EXISTS transactions")
+    cur.execute("DROP TABLE IF EXISTS profiles")
+    cur.execute("DROP TABLE IF EXISTS users")
 
-    # Create tables only if they do not exist
+    # Users table
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS users (
+    CREATE TABLE users (
         id INT AUTO_INCREMENT PRIMARY KEY,
         phone VARCHAR(20) UNIQUE,
         gender VARCHAR(10),
@@ -38,14 +46,15 @@ def init_db():
     )
     """)
 
+    # Profiles table (append-only)
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS profiles (
-        user_id INT PRIMARY KEY,
+    CREATE TABLE profiles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
         name VARCHAR(100),
         age INT,
         location VARCHAR(100),
         intent VARCHAR(50),
-        preferred_gender VARCHAR(10),
         age_min INT,
         age_max INT,
         contact_phone VARCHAR(20),
@@ -53,8 +62,9 @@ def init_db():
     )
     """)
 
+    # Transactions table
     cur.execute("""
-    CREATE TABLE IF NOT EXISTS transactions (
+    CREATE TABLE transactions (
         id INT AUTO_INCREMENT PRIMARY KEY,
         user_id INT,
         reference VARCHAR(100),
@@ -64,11 +74,12 @@ def init_db():
         created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
     )
     """)
-
     c.commit()
     cur.close()
     c.close()
 
+# -------------------------------------------------
+# USER MANAGEMENT
 # -------------------------------------------------
 def get_or_create_user(phone):
     c = conn()
@@ -84,7 +95,7 @@ def get_or_create_user(phone):
     c.close()
     return u
 
-def set_state(uid, state):
+def update_chat_state(uid, state):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, uid))
@@ -93,15 +104,15 @@ def set_state(uid, state):
     c.close()
 
 def reset_user(uid):
-    # Only reset chat state, do not delete profiles
     c = conn()
     cur = c.cursor()
+    # Do NOT delete previous profiles
     cur.execute("UPDATE users SET chat_state='NEW' WHERE id=%s", (uid,))
     c.commit()
     cur.close()
     c.close()
 
-def set_gender(uid, gender):
+def update_gender(uid, gender):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET gender=%s WHERE id=%s", (gender, uid))
@@ -109,26 +120,52 @@ def set_gender(uid, gender):
     cur.close()
     c.close()
 
-def upsert_profile(uid, field, value):
+# -------------------------------------------------
+# PROFILE MANAGEMENT
+# -------------------------------------------------
+def create_profile(uid, name="", age=None, location="", intent="", age_min=None, age_max=None, contact_phone=""):
     c = conn()
     cur = c.cursor()
-    # Insert a new profile row if it doesn't exist
-    cur.execute("INSERT IGNORE INTO profiles (user_id) VALUES (%s)", (uid,))
-    # Update the specified field
-    cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, uid))
+    cur.execute("""
+        INSERT INTO profiles (user_id, name, age, location, intent, age_min, age_max, contact_phone)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (uid, name, age, location, intent, age_min, age_max, contact_phone))
     c.commit()
     cur.close()
     c.close()
 
+def upsert_profile(uid, field, value):
+    """
+    If the user has a profile row without data, update it; otherwise create a new profile row.
+    """
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    # Check if profile exists for this user
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
+    profile = cur.fetchone()
+    if profile:
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
+    else:
+        # Create new profile row
+        create_profile(uid)
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s ORDER BY id DESC LIMIT 1", (value, uid))
+    c.commit()
+    cur.close()
+    c.close()
+
+# -------------------------------------------------
+# MATCHMAKING
+# -------------------------------------------------
 def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("""
-    SELECT p.*
-    FROM profiles p
-    JOIN users u ON u.id=p.user_id
-    WHERE u.id != %s
-    LIMIT %s
+        SELECT p.*
+        FROM profiles p
+        JOIN users u ON u.id=p.user_id
+        WHERE u.id != %s
+        ORDER BY p.id DESC
+        LIMIT %s
     """, (uid, limit))
     res = cur.fetchall()
     cur.close()
@@ -136,38 +173,27 @@ def get_matches(uid, limit=2):
     return res
 
 # -------------------------------------------------
-def create_tx(uid, ref, poll, amount):
+# TRANSACTIONS
+# -------------------------------------------------
+def create_transaction(uid, ref, poll, amount):
     c = conn()
     cur = c.cursor()
     cur.execute("""
-    INSERT INTO transactions (user_id,reference,poll_url,amount,status)
-    VALUES (%s,%s,%s,%s,'PENDING')
+        INSERT INTO transactions (user_id,reference,poll_url,amount,status)
+        VALUES (%s,%s,%s,%s,'PENDING')
     """, (uid, ref, poll, amount))
     c.commit()
     cur.close()
     c.close()
 
-def mark_paid(ref):
+def mark_transaction_paid(ref):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE transactions SET status='PAID' WHERE reference=%s", (ref,))
     cur.execute("""
-    UPDATE users SET is_active=1, subscription_expiry=%s
-    WHERE id=(SELECT user_id FROM transactions WHERE reference=%s)
+        UPDATE users SET is_active=1, subscription_expiry=%s
+        WHERE id=(SELECT user_id FROM transactions WHERE reference=%s)
     """, (datetime.utcnow()+timedelta(days=1), ref))
     c.commit()
     cur.close()
     c.close()
-
-def get_transaction_by_reference(ref):
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM transactions WHERE reference=%s", (ref,))
-    tx = cur.fetchone()
-    cur.close()
-    c.close()
-    return tx
-
-def unlock_full_profiles(uid):
-    # No-op for now, just placeholder
-    pass
