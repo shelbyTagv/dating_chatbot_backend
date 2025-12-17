@@ -103,19 +103,19 @@ def update_chat_state(uid, state):
     cur.close()
     c.close()
 
-def reset_user(uid):
-    c = conn()
-    cur = c.cursor()
-    # Do NOT delete previous profiles
-    cur.execute("UPDATE users SET chat_state='NEW' WHERE id=%s", (uid,))
-    c.commit()
-    cur.close()
-    c.close()
-
 def update_gender(uid, gender):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET gender=%s WHERE id=%s", (gender, uid))
+    c.commit()
+    cur.close()
+    c.close()
+
+def reset_user(uid):
+    c = conn()
+    cur = c.cursor()
+    # Keep existing profiles, just reset chat state
+    cur.execute("UPDATE users SET chat_state='NEW' WHERE id=%s", (uid,))
     c.commit()
     cur.close()
     c.close()
@@ -140,13 +140,13 @@ def upsert_profile(uid, field, value):
     """
     c = conn()
     cur = c.cursor(dictionary=True)
-    # Check if profile exists for this user
+    # Get the most recent profile row
     cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
     profile = cur.fetchone()
     if profile:
         cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
     else:
-        # Create new profile row
+        # Create a new profile row
         create_profile(uid)
         cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s ORDER BY id DESC LIMIT 1", (value, uid))
     c.commit()
