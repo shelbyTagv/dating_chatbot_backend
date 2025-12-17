@@ -2,8 +2,6 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import time
-import hashlib
 import requests
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -19,12 +17,6 @@ ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
 GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 
-PAYNOW_INIT_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
-PAYNOW_ID = os.getenv("PAYNOW_ID")
-PAYNOW_KEY = os.getenv("PAYNOW_KEY")
-BASE_URL = os.getenv("BASE_URL")
-PAYMENT_AMOUNT = "2.00"
-
 # -------------------------------------------------
 # STARTUP
 # -------------------------------------------------
@@ -38,7 +30,10 @@ def startup():
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {"chatId": f"{phone}@c.us", "message": text}
-    requests.post(url, json=payload, timeout=15)
+    try:
+        requests.post(url, json=payload, timeout=15)
+    except Exception as e:
+        print("Failed to send message:", e)
 
 # -------------------------------------------------
 # CONSTANTS
@@ -99,7 +94,8 @@ async def webhook(request: Request):
         return JSONResponse({"status": "no-text"})
 
     reply = handle_message(phone, text)
-    send_whatsapp_message(phone, reply)
+    if reply:
+        send_whatsapp_message(phone, reply)
     return JSONResponse({"status": "processed"})
 
 # -------------------------------------------------
@@ -203,7 +199,8 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "PAY")
 
         if not matches:
-            return "No matches found yet. Try again later."
+            # No matches yet: end conversation gracefully
+            return "✅ Your profile is saved! We will notify you when matches are available. Check back later."
 
         preview = "🔥 Top Matches:\n\n"
         for m in matches:

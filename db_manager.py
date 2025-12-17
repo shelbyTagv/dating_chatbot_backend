@@ -30,8 +30,7 @@ def conn():
 def init_db():
     c = conn()
     cur = c.cursor()
-    
-    # Only create tables if they do not exist (avoid dropping)
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS users (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -42,7 +41,7 @@ def init_db():
         subscription_expiry DATETIME
     )
     """)
-    
+
     cur.execute("""
     CREATE TABLE IF NOT EXISTS profiles (
         id INT AUTO_INCREMENT PRIMARY KEY,
@@ -84,9 +83,10 @@ def get_or_create_user(phone):
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
     u = cur.fetchone()
     if not u:
-        cur.execute("INSERT INTO users (phone,chat_state) VALUES (%s,'NEW')", (phone,))
+        # Create new user and always a new row
+        cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s,'NEW')", (phone,))
         c.commit()
-        cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
+        cur.execute("SELECT * FROM users WHERE id=LAST_INSERT_ID()")
         u = cur.fetchone()
     cur.close()
     c.close()
@@ -124,15 +124,15 @@ def create_profile(uid, name="", age=None, location="", intent="", preferred_gen
 
 def upsert_profile(uid, field, value):
     """
-    Append-only: if last profile has empty data, update it; else create a new profile row.
+    Updates last incomplete profile if exists, otherwise creates a new profile row.
     """
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
     profile = cur.fetchone()
-    
-    if profile and all(v is not None and v != "" for k,v in profile.items() if k not in ["id","user_id"]):
-        # Last profile is filled; create a new one
+
+    if not profile or all(v is not None and v != "" for k,v in profile.items() if k not in ["id","user_id"]):
+        # Last profile filled or doesn't exist -> create new
         create_profile(uid)
         cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
         profile = cur.fetchone()
@@ -145,31 +145,48 @@ def upsert_profile(uid, field, value):
 # -------------------------------------------------
 # MATCHMAKING
 # -------------------------------------------------
-def get_matches(uid, limit=2):
+def get_matches(uid, limit=5):
     c = conn()
     cur = c.cursor(dictionary=True)
-    # Get current user's profile
-    cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
+
+    # Fetch current user's latest profile
+    cur.execute("SELECT u.gender as my_gender, u.id as user_id, p.* FROM profiles p JOIN users u ON u.id = p.user_id WHERE u.id=%s ORDER BY p.id DESC LIMIT 1", (uid,))
     me = cur.fetchone()
     if not me:
         return []
 
-    # Match based on preferred gender and age range
+    my_gender = me["my_gender"]
+    my_age_min = me["age_min"]
+    my_age_max = me["age_max"]
+    my_age = me["age"]
+
+    # Fetch potential matches
     cur.execute("""
-        SELECT p.*
+        SELECT p.*, u.gender as user_gender
         FROM profiles p
         JOIN users u ON u.id = p.user_id
         WHERE u.id != %s
-          AND (%s='any' OR p.gender=%s OR p.preferred_gender=%s)
+          AND (p.preferred_gender='any' OR p.preferred_gender=%s)
+          AND (%s='any' OR u.gender=%s)
           AND p.age BETWEEN %s AND %s
+          AND %s BETWEEN p.age_min AND p.age_max
         ORDER BY p.id DESC
         LIMIT %s
-    """, (uid, me["preferred_gender"], me["preferred_gender"], me["preferred_gender"], me["age_min"], me["age_max"], limit))
-    
-    res = cur.fetchall()
+    """, (
+        uid,                   # Exclude self
+        my_gender,             # Match the current user's gender against potential match's preferred_gender
+        me["preferred_gender"],# Respect current user's preferred gender
+        me["preferred_gender"],# Match potential match's gender against my preferred gender
+        my_age_min, my_age_max,# Current user's preferred age range
+        my_age,                # My age must fit in potential match's age_min/max
+        limit
+    ))
+
+    matches = cur.fetchall()
     cur.close()
     c.close()
-    return res
+    return matches
+
 
 # -------------------------------------------------
 # TRANSACTIONS
