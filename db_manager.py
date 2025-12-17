@@ -1,7 +1,7 @@
 from dotenv import load_dotenv
 load_dotenv()
 
-import os
+import os, random
 import mysql.connector.pooling
 from datetime import datetime, timedelta
 
@@ -145,47 +145,93 @@ def upsert_profile(uid, field, value):
 # -------------------------------------------------
 # MATCHMAKING
 # -------------------------------------------------
-def get_matches(uid, limit=5):
+def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
 
     # Fetch current user's latest profile
-    cur.execute("SELECT u.gender as my_gender, u.id as user_id, p.* FROM profiles p JOIN users u ON u.id = p.user_id WHERE u.id=%s ORDER BY p.id DESC LIMIT 1", (uid,))
+    cur.execute("""
+        SELECT u.gender as my_gender, u.id as user_id, p.*
+        FROM profiles p
+        JOIN users u ON u.id = p.user_id
+        WHERE u.id=%s
+        ORDER BY p.id DESC
+        LIMIT 1
+    """, (uid,))
     me = cur.fetchone()
     if not me:
         return []
 
-    my_gender = me["my_gender"]
-    my_age_min = me["age_min"]
-    my_age_max = me["age_max"]
+    my_gender = me["my_gender"].lower()
     my_age = me["age"]
+    my_intent = me["intent"].lower()
+    my_pref_gender = me["preferred_gender"].lower()
 
-    # Fetch potential matches
+    # Define intent match mapping
+    intent_pairs = {
+        "girlfriend": "boyfriend",
+        "boyfriend": "girlfriend",
+        "sugar mummy": "benten",
+        "benten": "sugar mummy",
+        "sugar daddy": "sugar baby",
+        "sugar baby": "sugar daddy",
+        "1 night stand": "1 night stand",
+        "friend": "friend",
+        "just vibes": "just vibes"
+    }
+
+    # Fetch all potential matches
     cur.execute("""
-        SELECT p.*, u.gender as user_gender
+        SELECT p.*, u.gender as user_gender, u.id as user_id
         FROM profiles p
         JOIN users u ON u.id = p.user_id
         WHERE u.id != %s
-          AND (p.preferred_gender='any' OR p.preferred_gender=%s)
-          AND (%s='any' OR u.gender=%s)
-          AND p.age BETWEEN %s AND %s
-          AND %s BETWEEN p.age_min AND p.age_max
-        ORDER BY p.id DESC
-        LIMIT %s
-    """, (
-        uid,                   # Exclude self
-        my_gender,             # Match the current user's gender against potential match's preferred_gender
-        me["preferred_gender"],# Respect current user's preferred gender
-        me["preferred_gender"],# Match potential match's gender against my preferred gender
-        my_age_min, my_age_max,# Current user's preferred age range
-        my_age,                # My age must fit in potential match's age_min/max
-        limit
-    ))
-
-    matches = cur.fetchall()
+          AND p.age_min IS NOT NULL
+          AND p.age_max IS NOT NULL
+          AND p.preferred_gender IS NOT NULL
+          AND p.intent IS NOT NULL
+          AND u.gender IS NOT NULL
+    """, (uid,))
+    candidates = cur.fetchall()
     cur.close()
     c.close()
-    return matches
+
+    # Filter candidates based on all 3 checks
+    matches = []
+    for c in candidates:
+        cand_age_min = c["age_min"]
+        cand_age_max = c["age_max"]
+        cand_intent = c["intent"].lower()
+        cand_gender = c["user_gender"].lower()
+        cand_pref_gender = c["preferred_gender"].lower()
+
+        # 1️⃣ Age check: current user's age in candidate's preferred age range
+        if not (cand_age_min <= my_age <= cand_age_max):
+            continue
+
+        # 2️⃣ Intent check: candidate's intent matches the mapping
+        if intent_pairs.get(my_intent) != cand_intent:
+            continue
+
+        # 3️⃣ Preferred gender check: mutual preference
+        if my_pref_gender != "any" and cand_gender != my_pref_gender:
+            continue
+        if cand_pref_gender != "any" and my_gender != cand_pref_gender:
+            continue
+
+        matches.append(c)
+
+    # Randomize the matches
+    random.shuffle(matches)
+
+    # Limit to the requested number of matches
+    limited_matches = matches[:limit]
+
+    # Add info about more matches
+    for m in limited_matches:
+        m["more_available"] = len(matches) > limit
+
+    return limited_matches
 
 
 # -------------------------------------------------
