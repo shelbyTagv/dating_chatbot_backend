@@ -121,7 +121,7 @@ def handle_message(phone: str, text: str) -> str:
     # NEW user
     if state == "NEW":
         db_manager.set_state(uid, "GET_GENDER")
-        return "Welcome to Shelby Date Connections ❤️\n\nWhat is your gender? (MALE/FEMALE/OTHER)"
+        return "Welcome to Shelby Date Connections ❤️\n\nWhat is your gender? (MALE/FEMALE)"
 
     # GET GENDER
     if state == "GET_GENDER":
