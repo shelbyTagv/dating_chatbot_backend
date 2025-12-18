@@ -111,12 +111,19 @@ def start_payment_polling():
 # WHATSAPP SEND
 # -----------------------------
 def send_whatsapp_message(phone, text):
-    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
-    requests.post(
-        url,
-        json={"chatId": f"{phone}@c.us", "message": text},
-        timeout=15
-    )
+    url = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
+    headers = {
+        "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
+        "Content-Type": "application/json"
+    }
+    payload = {
+        "messaging_product": "whatsapp",
+        "to": phone,
+        "type": "text",
+        "text": {"body": text}
+    }
+    requests.post(url, json=payload, headers=headers, timeout=15)
+
 
 # -----------------------------
 # WEBHOOK
