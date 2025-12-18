@@ -121,8 +121,15 @@ def send_whatsapp_message(phone, text):
 # WEBHOOK
 # -----------------------------
 @app.get("/webhook")
-async def verify():
-    return PlainTextResponse("OK")
+async def verify(request: Request):
+    params = request.query_params
+    if (
+        params.get("hub.mode") == "subscribe"
+        and params.get("hub.verify_token") == "verify123"
+    ):
+        return PlainTextResponse(params.get("hub.challenge"))
+    return PlainTextResponse("Verification failed", status_code=403)
+
 
 @app.post("/webhook")
 async def webhook(request: Request):
