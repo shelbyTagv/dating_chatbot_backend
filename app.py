@@ -189,7 +189,7 @@ def infer_gender(intent):
 # -------------------------------------------------
 def handle_message(phone, text):
 
-    print(f"PHONE: {phone}, STATE: {state}, MSG: {msg}")
+    
     msg = text.strip()
     msg_l = msg.lower()
 
@@ -205,6 +205,8 @@ def handle_message(phone, text):
 
     uid = user["id"]
     state = user["chat_state"]
+
+    print(f"PHONE: {phone}, STATE: {state}, MSG: {msg}")
 
     # ensure exactly ONE profile exists
     db_manager.ensure_profile(uid)
