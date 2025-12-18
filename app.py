@@ -188,6 +188,8 @@ def infer_gender(intent):
 # CHAT HANDLER
 # -------------------------------------------------
 def handle_message(phone, text):
+
+    print(f"PHONE: {phone}, STATE: {state}, MSG: {msg}")
     msg = text.strip()
     msg_l = msg.lower()
 
@@ -199,13 +201,13 @@ def handle_message(phone, text):
         user = db_manager.create_new_user(phone)
     elif not user["chat_state"]:
         db_manager.set_state(user["id"], "NEW")
+        user["chat_state"] = "NEW"
 
     uid = user["id"]
+    state = user["chat_state"]
 
     # ensure exactly ONE profile exists
     db_manager.ensure_profile(uid)
-
-    state = user["chat_state"]
 
     # ------------------------------
     # EXIT
@@ -229,6 +231,7 @@ def handle_message(phone, text):
         )
 
     if state == "GET_GENDER":
+        msg_l = msg.lower().strip()
         if msg_l not in ["male", "female", "other"]:
             return "❗ Please reply with *MALE*, *FEMALE*, or *OTHER*."
         db_manager.set_gender(uid, msg_l)

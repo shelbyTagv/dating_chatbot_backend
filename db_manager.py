@@ -25,31 +25,27 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# INIT DB (DROP AND CREATE)
+# INIT DB (CREATE IF NOT EXISTS)
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
 
-    # Drop tables in correct order to avoid FK issues
-    cur.execute("DROP TABLE IF EXISTS payments")
-    cur.execute("DROP TABLE IF EXISTS profiles")
-    cur.execute("DROP TABLE IF EXISTS users")
-
     # Create USERS
     cur.execute("""
-        CREATE TABLE users (
+        CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone VARCHAR(20) UNIQUE,
-            chat_state VARCHAR(32) DEFAULT NULL,
+            chat_state VARCHAR(32) DEFAULT 'NEW',
             is_paid TINYINT DEFAULT 0
         )
     """)
 
     # Create PROFILES
     cur.execute("""
-        CREATE TABLE profiles (
+        CREATE TABLE IF NOT EXISTS profiles (
             user_id INT PRIMARY KEY,
+            gender VARCHAR(10),
             name VARCHAR(100),
             age INT,
             location VARCHAR(100),
@@ -64,7 +60,7 @@ def init_db():
 
     # Create PAYMENTS
     cur.execute("""
-        CREATE TABLE payments (
+        CREATE TABLE IF NOT EXISTS payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT,
             reference VARCHAR(50),
@@ -99,8 +95,9 @@ def create_new_user(phone):
         (phone, "NEW")
     )
     c.commit()
+    cur.close()
+    c.close()
     return get_user_by_phone(phone)
-
 
 def set_state(uid, state):
     c = conn()
@@ -131,6 +128,7 @@ def reset_profile(uid):
     cur = c.cursor()
     cur.execute("""
         UPDATE profiles SET
+            gender=NULL,
             name=NULL,
             age=NULL,
             location=NULL,
@@ -153,6 +151,9 @@ def update_profile(uid, field, value):
     c.commit()
     cur.close()
     c.close()
+
+def set_gender(uid, gender):
+    update_profile(uid, "gender", gender)
 
 # -------------------------------------------------
 # PAYMENT FUNCTIONS
@@ -220,7 +221,3 @@ def get_matches(uid, limit=2):
     cur.close()
     c.close()
     return rows[:limit]
-
-def set_gender(uid, gender):
-    update_profile(uid, "gender", gender)
-
