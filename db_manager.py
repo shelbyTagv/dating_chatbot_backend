@@ -26,21 +26,31 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# INIT DB
+# INIT DB (DROP + RECREATE)
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
+
+    # DROP IN CORRECT ORDER (FK SAFETY)
+    cur.execute("DROP TABLE IF EXISTS payments")
+    cur.execute("DROP TABLE IF EXISTS profiles")
+    cur.execute("DROP TABLE IF EXISTS users")
+
+    # USERS
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            phone VARCHAR(20) UNIQUE,
-            chat_state VARCHAR(20) DEFAULT 'NEW',
-            is_active BOOLEAN DEFAULT 0
+            phone VARCHAR(20) UNIQUE NOT NULL,
+            chat_state VARCHAR(30) DEFAULT 'NEW',
+            is_active BOOLEAN DEFAULT 0,
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
         )
     """)
+
+    # PROFILES (1:1 WITH USERS)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
+        CREATE TABLE profiles (
             user_id INT PRIMARY KEY,
             name VARCHAR(100),
             age INT,
@@ -49,19 +59,24 @@ def init_db():
             preferred_gender VARCHAR(10),
             age_min INT,
             age_max INT,
-            contact_phone VARCHAR(20)
+            contact_phone VARCHAR(20),
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+
+    # PAYMENTS
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS payments (
+        CREATE TABLE payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id INT,
-            reference VARCHAR(50),
+            user_id INT NOT NULL,
+            reference VARCHAR(100),
             poll_url TEXT,
             status VARCHAR(20) DEFAULT 'PENDING',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
+            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
+
     c.commit()
     cur.close()
     c.close()
@@ -81,88 +96,20 @@ def get_user_by_phone(phone):
 def create_new_user(phone):
     c = conn()
     cur = c.cursor()
-    cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s, 'NEW')", (phone,))
+    cur.execute(
+        "INSERT INTO users (phone, chat_state) VALUES (%s, 'NEW')",
+        (phone,)
+    )
     c.commit()
-    user_id = cur.lastrowid
+    uid = cur.lastrowid
     cur.close()
     c.close()
-    return {"id": user_id, "phone": phone, "chat_state": "NEW"}
+    return {"id": uid, "phone": phone}
 
-# -------------------------------------------------
-# PROFILE FUNCTIONS
-# -------------------------------------------------
-def ensure_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (uid,))
-    if not cur.fetchone():
-        cur.execute("INSERT INTO profiles (user_id) VALUES (%s)", (uid,))
-        c.commit()
-    cur.close()
-    c.close()
-
-def reset_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        UPDATE profiles SET
-            name=NULL, age=NULL, location=NULL,
-            intent=NULL, preferred_gender=NULL,
-            age_min=NULL, age_max=NULL,
-            contact_phone=NULL
-        WHERE user_id=%s
-    """, (uid,))
-    c.commit()
-    cur.close()
-    c.close()
-
-def update_profile(uid, key, value):
-    c = conn()
-    cur = c.cursor()
-    query = f"UPDATE profiles SET {key}=%s WHERE user_id=%s"
-    cur.execute(query, (value, uid))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# CHAT STATE
-# -------------------------------------------------
 def set_state(uid, state):
     c = conn()
     cur = c.cursor()
     cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, uid))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# PAYMENT FUNCTIONS
-# -------------------------------------------------
-def create_payment(uid, ref, poll_url):
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        "INSERT INTO payments (user_id, reference, poll_url) VALUES (%s,%s,%s)",
-        (uid, ref, poll_url)
-    )
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_pending_payments():
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM payments WHERE status='PENDING'")
-    rows = cur.fetchall()
-    cur.close()
-    c.close()
-    return rows
-
-def mark_payment_paid(pid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE payments SET status='PAID' WHERE id=%s", (pid,))
     c.commit()
     cur.close()
     c.close()
@@ -185,19 +132,114 @@ def get_user_phone(uid):
     return phone
 
 # -------------------------------------------------
+# PROFILE FUNCTIONS
+# -------------------------------------------------
+def ensure_profile(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT user_id FROM profiles WHERE user_id=%s", (uid,))
+    if not cur.fetchone():
+        cur.execute("INSERT INTO profiles (user_id) VALUES (%s)", (uid,))
+        c.commit()
+    cur.close()
+    c.close()
+
+def reset_profile(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        UPDATE profiles SET
+            name=NULL,
+            age=NULL,
+            location=NULL,
+            intent=NULL,
+            preferred_gender=NULL,
+            age_min=NULL,
+            age_max=NULL,
+            contact_phone=NULL
+        WHERE user_id=%s
+    """, (uid,))
+    c.commit()
+    cur.close()
+    c.close()
+
+def update_profile(uid, field, value):
+    if field not in {
+        "name", "age", "location", "intent",
+        "preferred_gender", "age_min",
+        "age_max", "contact_phone"
+    }:
+        raise ValueError("Invalid profile field")
+
+    c = conn()
+    cur = c.cursor()
+    cur.execute(
+        f"UPDATE profiles SET {field}=%s WHERE user_id=%s",
+        (value, uid)
+    )
+    c.commit()
+    cur.close()
+    c.close()
+
+# -------------------------------------------------
+# PAYMENT FUNCTIONS
+# -------------------------------------------------
+def create_payment(uid, reference, poll_url):
+    c = conn()
+    cur = c.cursor()
+    cur.execute(
+        "INSERT INTO payments (user_id, reference, poll_url) VALUES (%s,%s,%s)",
+        (uid, reference, poll_url)
+    )
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_pending_payments():
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM payments WHERE status='PENDING'")
+    rows = cur.fetchall()
+    cur.close()
+    c.close()
+    return rows
+
+def mark_payment_paid(payment_id):
+    c = conn()
+    cur = c.cursor()
+    cur.execute(
+        "UPDATE payments SET status='PAID' WHERE id=%s",
+        (payment_id,)
+    )
+    c.commit()
+    cur.close()
+    c.close()
+
+# -------------------------------------------------
 # MATCHES
 # -------------------------------------------------
 def get_matches(uid, limit=2):
     c = conn()
     cur = c.cursor(dictionary=True)
+
     cur.execute("""
-        SELECT p.*, u.phone AS contact_phone
+        SELECT
+            p.name,
+            p.age,
+            p.location,
+            p.intent,
+            p.contact_phone
         FROM profiles p
-        JOIN users u ON u.id=p.user_id
-        WHERE p.user_id!=%s AND p.contact_phone IS NOT NULL
+        JOIN users u ON u.id = p.user_id
+        WHERE
+            p.user_id != %s
+            AND p.contact_phone IS NOT NULL
+            AND u.is_active = 1
     """, (uid,))
+
     rows = cur.fetchall()
     random.shuffle(rows)
+
     cur.close()
     c.close()
     return rows[:limit]

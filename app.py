@@ -5,6 +5,7 @@ import os
 import time
 import uuid
 import threading
+import hashlib
 import requests
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse, PlainTextResponse
@@ -47,12 +48,22 @@ def send_whatsapp_message(phone, text):
             timeout=15
         )
     except Exception as e:
-        print("WhatsApp send failed:", e)
+        print("WhatsApp send error:", e)
 
 # -------------------------------------------------
-# PAYNOW CREATE (ECOCASH ONLY)
+# PAYNOW HASH (MANDATORY)
 # -------------------------------------------------
-def create_paynow_payment(uid, phone):
+def generate_paynow_hash(values: dict) -> str:
+    s = ""
+    for k in sorted(values.keys()):
+        s += str(values[k])
+    s += PAYNOW_KEY
+    return hashlib.sha512(s.encode()).hexdigest().upper()
+
+# -------------------------------------------------
+# PAYNOW CREATE (ECOCASH)
+# -------------------------------------------------
+def create_paynow_payment(uid, ecocash_phone):
     ref = f"ORDER-{uuid.uuid4().hex[:10]}"
 
     payload = {
@@ -63,18 +74,16 @@ def create_paynow_payment(uid, phone):
         "returnurl": RETURN_URL,
         "resulturl": RESULT_URL,
         "authemail": "payments@example.com",
-        "phone": phone,
+        "phone": ecocash_phone,
         "method": "ecocash"
     }
+
+    payload["hash"] = generate_paynow_hash(payload)
 
     try:
         r = requests.post(PAYNOW_URL, data=payload, timeout=20)
     except Exception as e:
-        print("Paynow request error:", e)
-        return None
-
-    if r.status_code != 200:
-        print("Paynow HTTP error:", r.status_code, r.text)
+        print("Paynow request failed:", e)
         return None
 
     poll_url = None
@@ -87,19 +96,18 @@ def create_paynow_payment(uid, phone):
             pay_url = line.split("=", 1)[1]
 
     if not poll_url or not pay_url:
-        print("Paynow response invalid:", r.text)
+        print("Invalid Paynow response:", r.text)
         return None
 
     db_manager.create_payment(uid, ref, poll_url)
     return pay_url
 
 # -------------------------------------------------
-# PAYMENT POLLING (BACKGROUND THREAD)
+# PAYMENT POLLING
 # -------------------------------------------------
 def poll_payments():
     while True:
-        unpaid = db_manager.get_pending_payments()
-        for p in unpaid:
+        for p in db_manager.get_pending_payments():
             try:
                 r = requests.get(p["poll_url"], timeout=15)
                 if "paid" in r.text.lower():
@@ -109,47 +117,40 @@ def poll_payments():
                     phone = db_manager.get_user_phone(p["user_id"])
                     matches = db_manager.get_matches(p["user_id"])
 
-                    reply = "✅ *Payment Confirmed!*\n\n📞 Contact details:\n\n"
+                    msg = "✅ *Payment Confirmed!*\n\n📞 Contact details:\n\n"
                     for m in matches:
-                        reply += f"{m['name']} — {m['contact_phone']}\n"
+                        msg += f"{m['name']} — {m['contact_phone']}\n"
 
-                    send_whatsapp_message(phone, reply)
-            except Exception as e:
-                print("Polling error:", e)
-
+                    send_whatsapp_message(phone, msg)
+            except:
+                pass
         time.sleep(20)
 
 def start_payment_polling():
-    t = threading.Thread(target=poll_payments, daemon=True)
-    t.start()
+    threading.Thread(target=poll_payments, daemon=True).start()
 
 # -------------------------------------------------
-# PAYNOW RETURN (USER REDIRECT)
+# PAYNOW RETURN
 # -------------------------------------------------
 @app.get("/paynow/return")
 def paynow_return():
     return PlainTextResponse(
-        "✅ Payment received.\n\nPlease return to WhatsApp to continue.",
+        "✅ Payment completed.\n\nPlease return to WhatsApp.",
         status_code=200
     )
 
 # -------------------------------------------------
-# PAYNOW RESULT (SERVER CALLBACK)
+# PAYNOW RESULT
 # -------------------------------------------------
 @app.post("/paynow/result")
 async def paynow_result(request: Request):
-    data = await request.form()
-    payload = dict(data)
-    print("Paynow RESULT callback:", payload)
-    return PlainTextResponse("OK", status_code=200)
-
-# -------------------------------------------------
-# WEBHOOK (GREEN API)
-# -------------------------------------------------
-@app.get("/webhook")
-async def verify():
+    data = dict(await request.form())
+    print("Paynow RESULT:", data)
     return PlainTextResponse("OK")
 
+# -------------------------------------------------
+# WEBHOOK
+# -------------------------------------------------
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
@@ -160,25 +161,15 @@ async def webhook(request: Request):
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
-    sender = payload.get("senderData", {})
-    phone = sender.get("chatId", "").split("@")[0]
+    phone = payload["senderData"]["chatId"].split("@")[0]
+    msg = payload["messageData"].get("textMessageData", {}).get("textMessage", "").strip()
 
-    msg = payload.get("messageData", {})
-    text = (
-        msg.get("textMessageData", {}).get("textMessage")
-        or msg.get("extendedTextMessageData", {}).get("text")
-        or ""
-    ).strip()
-
-    if not phone or not text:
-        return JSONResponse({"status": "empty"})
-
-    reply = handle_message(phone, text)
+    reply = handle_message(phone, msg)
     send_whatsapp_message(phone, reply)
-    return JSONResponse({"status": "processed"})
+    return JSONResponse({"status": "ok"})
 
 # -------------------------------------------------
-# CHAT HANDLER
+# CHAT HANDLER (FULL FLOW)
 # -------------------------------------------------
 def handle_message(phone, text):
     msg = text.lower().strip()
@@ -188,16 +179,40 @@ def handle_message(phone, text):
         user = db_manager.create_new_user(phone)
 
     uid = user["id"]
-    db_manager.ensure_profile(uid)
-    state = user.get("chat_state")
+    state = user["chat_state"]
 
-    if state == "PAY":
-        if msg == "pay":
-            link = create_paynow_payment(uid, phone)
+    # EXIT ALWAYS WORKS
+    if msg == "exit":
+        db_manager.reset_chat_state(uid)
+        return "🔄 Chat restarted."
+
+    # UNPAID → VIEW MATCHES
+    if not user["is_paid"]:
+        if state is None:
+            db_manager.set_chat_state(uid, "AWAITING_ECOCASH")
+            return (
+                "🔒 To unlock contact details, pay $2 via EcoCash.\n\n"
+                "📞 Please enter your EcoCash phone number.\n\n"
+                "Type EXIT to cancel."
+            )
+
+        if state == "AWAITING_ECOCASH":
+            if not msg.isdigit():
+                return "❌ Invalid number. Please enter your EcoCash phone number."
+
+            link = create_paynow_payment(uid, msg)
             if not link:
-                return "❌ Payment initiation failed. Please try again later."
-            return f"💳 Pay via EcoCash:\n{link}\n\n⏳ Waiting for confirmation..."
-        return "💰 Reply *PAY* to unlock contact details."
+                return "❌ Payment initiation failed. Try again later."
 
-    # Placeholder for your existing flow
+            db_manager.set_chat_state(uid, "PAYMENT_PENDING")
+            return (
+                "💳 EcoCash payment initiated.\n\n"
+                "📲 Please check your phone and enter your EcoCash PIN.\n\n"
+                f"{link}\n\n"
+                "⏳ Waiting for confirmation..."
+            )
+
+        if state == "PAYMENT_PENDING":
+            return "⏳ Waiting for EcoCash confirmation..."
+
     return "OK"
