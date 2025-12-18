@@ -349,4 +349,4 @@ def handle_message(phone, text):
     if state == "PAYMENT_PENDING":
         return "⏳ Waiting for EcoCash payment confirmation..."
 
-    return "❗ Sorry, I didn't understand that. Please follow the instructions above."
+    return "❗ Sorry, I didn't understand. Please follow the instructions above."
