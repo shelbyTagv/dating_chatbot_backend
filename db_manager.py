@@ -2,21 +2,21 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import random
 import mysql.connector.pooling
-from datetime import datetime
+from datetime import datetime, timedelta
+import random
 
 _pool = None
 
 # -------------------------------------------------
-# CONNECTION POOL
+# DATABASE CONNECTION
 # -------------------------------------------------
 def conn():
     global _pool
     if not _pool:
         _pool = mysql.connector.pooling.MySQLConnectionPool(
             pool_name="dating_pool",
-            pool_size=10,
+            pool_size=5,
             host=os.getenv("MYSQLHOST"),
             user=os.getenv("MYSQLUSER"),
             password=os.getenv("MYSQLPASSWORD"),
@@ -26,55 +26,49 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# INIT DB (DROP + RECREATE)
+# INITIALIZE DATABASE
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
-
-    # DROP IN CORRECT ORDER (FK SAFETY)
-    cur.execute("DROP TABLE IF EXISTS payments")
-    cur.execute("DROP TABLE IF EXISTS profiles")
-    cur.execute("DROP TABLE IF EXISTS users")
-
-    # USERS
+    
     cur.execute("""
-        CREATE TABLE users (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            phone VARCHAR(20) UNIQUE NOT NULL,
-            chat_state VARCHAR(30) DEFAULT 'NEW',
-            is_active BOOLEAN DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
+    CREATE TABLE IF NOT EXISTS users (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        phone VARCHAR(20) UNIQUE,
+        gender VARCHAR(10),
+        chat_state VARCHAR(20),
+        is_active BOOLEAN DEFAULT 0,
+        subscription_expiry DATETIME
+    )
+    """)
+    
+    cur.execute("""
+    CREATE TABLE IF NOT EXISTS profiles (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        name VARCHAR(100),
+        age INT,
+        location VARCHAR(100),
+        intent VARCHAR(50),
+        preferred_gender VARCHAR(10),
+        age_min INT,
+        age_max INT,
+        contact_phone VARCHAR(20),
+        FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
+    )
     """)
 
-    # PROFILES (1:1 WITH USERS)
     cur.execute("""
-        CREATE TABLE profiles (
-            user_id INT PRIMARY KEY,
-            name VARCHAR(100),
-            age INT,
-            location VARCHAR(100),
-            intent VARCHAR(50),
-            preferred_gender VARCHAR(10),
-            age_min INT,
-            age_max INT,
-            contact_phone VARCHAR(20),
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
-    """)
-
-    # PAYMENTS
-    cur.execute("""
-        CREATE TABLE payments (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            user_id INT NOT NULL,
-            reference VARCHAR(100),
-            poll_url TEXT,
-            status VARCHAR(20) DEFAULT 'PENDING',
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
-        )
+    CREATE TABLE IF NOT EXISTS transactions (
+        id INT AUTO_INCREMENT PRIMARY KEY,
+        user_id INT,
+        reference VARCHAR(100),
+        poll_url TEXT,
+        amount DECIMAL(5,2),
+        status VARCHAR(20),
+        created_at TIMESTAMP DEFAULT CURRENT_TIMESTAMP
+    )
     """)
 
     c.commit()
@@ -82,29 +76,21 @@ def init_db():
     c.close()
 
 # -------------------------------------------------
-# USER FUNCTIONS
+# USER MANAGEMENT
 # -------------------------------------------------
-def get_user_by_phone(phone):
+def get_or_create_user(phone):
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
-    user = cur.fetchone()
+    u = cur.fetchone()
+    if not u:
+        cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s,'NEW')", (phone,))
+        c.commit()
+        cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
+        u = cur.fetchone()
     cur.close()
     c.close()
-    return user
-
-def create_new_user(phone):
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        "INSERT INTO users (phone, chat_state) VALUES (%s, 'NEW')",
-        (phone,)
-    )
-    c.commit()
-    uid = cur.lastrowid
-    cur.close()
-    c.close()
-    return {"id": uid, "phone": phone}
+    return u
 
 def set_state(uid, state):
     c = conn()
@@ -114,132 +100,149 @@ def set_state(uid, state):
     cur.close()
     c.close()
 
-def activate_user(uid):
+def set_gender(uid, gender):
     c = conn()
     cur = c.cursor()
-    cur.execute("UPDATE users SET is_active=1 WHERE id=%s", (uid,))
+    cur.execute("UPDATE users SET gender=%s WHERE id=%s", (gender, uid))
     c.commit()
     cur.close()
     c.close()
 
-def get_user_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
-    phone = cur.fetchone()[0]
-    cur.close()
-    c.close()
-    return phone
-
 # -------------------------------------------------
-# PROFILE FUNCTIONS
+# PROFILE MANAGEMENT
 # -------------------------------------------------
-def ensure_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT user_id FROM profiles WHERE user_id=%s", (uid,))
-    if not cur.fetchone():
-        cur.execute("INSERT INTO profiles (user_id) VALUES (%s)", (uid,))
-        c.commit()
-    cur.close()
-    c.close()
-
-def reset_profile(uid):
+def create_profile(uid, name="", age=None, location="", intent="", preferred_gender="any", age_min=None, age_max=None, contact_phone=""):
     c = conn()
     cur = c.cursor()
     cur.execute("""
-        UPDATE profiles SET
-            name=NULL,
-            age=NULL,
-            location=NULL,
-            intent=NULL,
-            preferred_gender=NULL,
-            age_min=NULL,
-            age_max=NULL,
-            contact_phone=NULL
-        WHERE user_id=%s
-    """, (uid,))
+        INSERT INTO profiles (user_id, name, age, location, intent, preferred_gender, age_min, age_max, contact_phone)
+        VALUES (%s,%s,%s,%s,%s,%s,%s,%s,%s)
+    """, (uid, name, age, location, intent, preferred_gender, age_min, age_max, contact_phone))
     c.commit()
     cur.close()
     c.close()
 
-def update_profile(uid, field, value):
-    if field not in {
-        "name", "age", "location", "intent",
-        "preferred_gender", "age_min",
-        "age_max", "contact_phone"
-    }:
-        raise ValueError("Invalid profile field")
-
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        f"UPDATE profiles SET {field}=%s WHERE user_id=%s",
-        (value, uid)
-    )
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# PAYMENT FUNCTIONS
-# -------------------------------------------------
-def create_payment(uid, reference, poll_url):
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        "INSERT INTO payments (user_id, reference, poll_url) VALUES (%s,%s,%s)",
-        (uid, reference, poll_url)
-    )
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_pending_payments():
+def upsert_profile(uid, field, value):
     c = conn()
     cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM payments WHERE status='PENDING'")
-    rows = cur.fetchall()
-    cur.close()
-    c.close()
-    return rows
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
+    profile = cur.fetchone()
 
-def mark_payment_paid(payment_id):
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        "UPDATE payments SET status='PAID' WHERE id=%s",
-        (payment_id,)
-    )
+    if profile and (profile.get(field) is None or profile.get(field) == ""):
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
+    else:
+        create_profile(uid)
+        cur.execute("SELECT * FROM profiles WHERE user_id=%s ORDER BY id DESC LIMIT 1", (uid,))
+        profile = cur.fetchone()
+        cur.execute(f"UPDATE profiles SET {field}=%s WHERE id=%s", (value, profile["id"]))
+
     c.commit()
     cur.close()
     c.close()
 
 # -------------------------------------------------
-# MATCHES
+# TRANSACTIONS
 # -------------------------------------------------
-def get_matches(uid, limit=2):
+def create_tx(uid, ref, poll, amount):
     c = conn()
-    cur = c.cursor(dictionary=True)
-
+    cur = c.cursor()
     cur.execute("""
-        SELECT
-            p.name,
-            p.age,
-            p.location,
-            p.intent,
-            p.contact_phone
+        INSERT INTO transactions (user_id,reference,poll_url,amount,status)
+        VALUES (%s,%s,%s,%s,'PENDING')
+    """, (uid, ref, poll, amount))
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_transaction_by_reference(ref):
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM transactions WHERE reference=%s", (ref,))
+    tx = cur.fetchone()
+    cur.close()
+    c.close()
+    return tx
+
+def mark_paid(ref):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("UPDATE transactions SET status='PAID' WHERE reference=%s", (ref,))
+    cur.execute("""
+        UPDATE users SET is_active=1, subscription_expiry=%s
+        WHERE id=(SELECT user_id FROM transactions WHERE reference=%s)
+    """, (datetime.utcnow()+timedelta(days=1), ref))
+    c.commit()
+    cur.close()
+    c.close()
+
+# -------------------------------------------------
+# AI-BASED MATCHMAKING
+# -------------------------------------------------
+def get_ai_matches(uid, limit=5):
+    """
+    Fetch potential matches using AI-based scoring.
+    Currently this simulates ranking by age, location, intent, gender preferences.
+    """
+    c = conn()
+    cur = c.cursor(dictionary=True)
+
+    # Fetch current user's latest profile
+    cur.execute("""
+        SELECT u.gender as my_gender, u.id as user_id, p.*
         FROM profiles p
         JOIN users u ON u.id = p.user_id
-        WHERE
-            p.user_id != %s
-            AND p.contact_phone IS NOT NULL
-            AND u.is_active = 1
+        WHERE u.id=%s
+        ORDER BY p.id DESC
+        LIMIT 1
     """, (uid,))
+    me = cur.fetchone()
+    if not me:
+        return []
 
-    rows = cur.fetchall()
-    random.shuffle(rows)
+    my_gender = (me.get("my_gender") or "any").lower()
+    my_age = me.get("age") or 0
+    my_intent = (me.get("intent") or "").lower()
+    my_pref_gender = (me.get("preferred_gender") or "any").lower()
 
+    # Fetch all other profiles
+    cur.execute("""
+        SELECT p.*, u.gender as user_gender, u.id as user_id
+        FROM profiles p
+        JOIN users u ON u.id = p.user_id
+        WHERE u.id != %s
+    """, (uid,))
+    candidates = cur.fetchall()
     cur.close()
     c.close()
-    return rows[:limit]
+
+    scored_matches = []
+    for c in candidates:
+        score = 0
+        age_min, age_max = c.get("age_min") or 0, c.get("age_max") or 100
+        candidate_gender = (c.get("user_gender") or "any").lower()
+        candidate_intent = (c.get("intent") or "").lower()
+        candidate_pref_gender = (c.get("preferred_gender") or "any").lower()
+
+        # Age compatibility
+        if age_min <= my_age <= age_max:
+            score += 1
+        # Gender preference
+        if my_pref_gender == "any" or candidate_gender == my_pref_gender:
+            score += 1
+        if candidate_pref_gender == "any" or my_gender == candidate_pref_gender:
+            score += 1
+        # Intent compatibility
+        if candidate_intent == my_intent:
+            score += 1
+
+        if score > 0:
+            c["score"] = score
+            scored_matches.append(c)
+
+    # Sort by score descending
+    scored_matches.sort(key=lambda x: x["score"], reverse=True)
+    limited_matches = scored_matches[:limit]
+    for m in limited_matches:
+        m["more_available"] = len(scored_matches) > limit
+
+    return limited_matches
