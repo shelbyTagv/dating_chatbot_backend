@@ -18,6 +18,7 @@ GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
 GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
+VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
 PAYNOW_ID = os.getenv("PAYNOW_ID")
 PAYNOW_KEY = os.getenv("PAYNOW_KEY")
@@ -121,14 +122,15 @@ def send_whatsapp_message(phone, text):
 # WEBHOOK
 # -----------------------------
 @app.get("/webhook")
-async def verify(request: Request):
-    params = request.query_params
-    if (
-        params.get("hub.mode") == "subscribe"
-        and params.get("hub.verify_token") == "verify123"
-    ):
-        return PlainTextResponse(params.get("hub.challenge"))
+async def verify_webhook(request: Request):
+    hub_mode = request.query_params.get("hub.mode")
+    hub_challenge = request.query_params.get("hub.challenge")
+    hub_verify_token = request.query_params.get("hub.verify_token")
+
+    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
+        return PlainTextResponse(hub_challenge)
     return PlainTextResponse("Verification failed", status_code=403)
+
 
 
 @app.post("/webhook")
