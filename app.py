@@ -9,9 +9,6 @@ import db_manager
 
 app = FastAPI()
 
-# -------------------------------------------------
-# ENV CONFIG
-# -------------------------------------------------
 GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
@@ -25,30 +22,27 @@ def startup():
     db_manager.init_db()
 
 # -------------------------------------------------
-# SEND WHATSAPP MESSAGE
+# WHATSAPP SEND
 # -------------------------------------------------
-def send_whatsapp_message(phone: str, text: str):
+def send_whatsapp_message(phone, text):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
-    payload = {"chatId": f"{phone}@c.us", "message": text}
-    try:
-        requests.post(url, json=payload, timeout=15)
-    except Exception as e:
-        print("WhatsApp send failed:", e)
+    requests.post(
+        url,
+        json={"chatId": f"{phone}@c.us", "message": text},
+        timeout=15
+    )
 
 # -------------------------------------------------
-# WEBHOOK VERIFY
+# WEBHOOK
 # -------------------------------------------------
 @app.get("/webhook")
-async def verify_webhook(request: Request):
+async def verify():
     return PlainTextResponse("OK")
 
-# -------------------------------------------------
-# INCOMING WEBHOOK
-# -------------------------------------------------
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
-    if GREEN_API_AUTH_TOKEN and (not auth or auth.replace("Bearer ", "") != GREEN_API_AUTH_TOKEN):
+    if GREEN_API_AUTH_TOKEN and auth != f"Bearer {GREEN_API_AUTH_TOKEN}":
         raise HTTPException(status_code=401)
 
     payload = await request.json()
@@ -56,26 +50,24 @@ async def webhook(request: Request):
         return JSONResponse({"status": "ignored"})
 
     sender = payload.get("senderData", {})
-    message_data = payload.get("messageData", {})
+    phone = sender.get("chatId", "").split("@")[0]
 
-    raw_chat_id = sender.get("chatId", "")
-    phone = raw_chat_id.split("@")[0]
-
-    text = ""
-    if "textMessageData" in message_data:
-        text = message_data["textMessageData"].get("textMessage", "").strip()
-    elif "extendedTextMessageData" in message_data:
-        text = message_data["extendedTextMessageData"].get("text", "").strip()
+    msg = payload.get("messageData", {})
+    text = (
+        msg.get("textMessageData", {}).get("textMessage")
+        or msg.get("extendedTextMessageData", {}).get("text")
+        or ""
+    ).strip()
 
     if not phone or not text:
-        return JSONResponse({"status": "no-text"})
+        return JSONResponse({"status": "empty"})
 
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
     return JSONResponse({"status": "processed"})
 
 # -------------------------------------------------
-# CHAT LOGIC
+# CHAT CONSTANTS (UX PRESERVED)
 # -------------------------------------------------
 INTENT_MAP = {
     "1": "sugar mummy",
@@ -85,7 +77,7 @@ INTENT_MAP = {
     "5": "boyfriend",
     "6": "1 night stand",
     "7": "just vibes",
-    "8": "friend",
+    "8": "friend"
 }
 
 AGE_MAP = {
@@ -94,7 +86,7 @@ AGE_MAP = {
     "3": (31, 35),
     "4": (36, 40),
     "5": (41, 50),
-    "6": (50, 99),
+    "6": (50, 99)
 }
 
 def infer_gender(intent):
@@ -104,38 +96,61 @@ def infer_gender(intent):
         return "male"
     return "any"
 
-def handle_message(phone: str, text: str) -> str:
+# -------------------------------------------------
+# CHAT HANDLER
+# -------------------------------------------------
+def handle_message(phone, text):
     msg = text.strip()
     msg_l = msg.lower()
 
-    user = db_manager.get_or_create_user(phone)
+    # ------------------------------
+    # USER / PROFILE (ONE ONLY)
+    # ------------------------------
+    user = db_manager.get_user_by_phone(phone)
+    if not user:
+        user = db_manager.create_new_user(phone)
+
     uid = user["id"]
+
+    # ensure exactly ONE profile exists
+    db_manager.ensure_profile(uid)
+
     state = user["chat_state"]
 
+    # ------------------------------
+    # EXIT
+    # ------------------------------
     if msg_l == "exit":
         db_manager.set_state(uid, "NEW")
-        return "❌ Conversation ended.\nType HELLO to start again."
+        return "❌ Conversation ended.\n\nType *HELLO* to start again."
 
-    # --------------------------
-    # New user flow
-    # --------------------------
+    # ------------------------------
+    # FLOW
+    # ------------------------------
     if state == "NEW":
+        db_manager.reset_profile(uid)  # ✅ reset profile on new flow
         db_manager.set_state(uid, "GET_GENDER")
-        return "Welcome to Shelby Date Connections ❤️\n\nWhat is your gender? (MALE/FEMALE/OTHER)"
+        return (
+            "👋 Welcome!\n\n"
+            "Please tell us your gender:\n"
+            "• MALE\n"
+            "• FEMALE\n"
+            "• OTHER"
+        )
 
     if state == "GET_GENDER":
         if msg_l not in ["male", "female", "other"]:
-            return "Please type MALE, FEMALE, or OTHER."
+            return "❗ Please reply with *MALE*, *FEMALE*, or *OTHER*."
         db_manager.set_gender(uid, msg_l)
         db_manager.set_state(uid, "WELCOME")
-        return "Thanks! Your gender is saved.\n\nType HELLO to start the conversation."
+        return "✅ Saved!\n\nType *HELLO* to continue."
 
     if state == "WELCOME":
         if msg_l != "hello":
-            return "Please type HELLO to continue."
+            return "👉 Please type *HELLO* to proceed."
         db_manager.set_state(uid, "GET_INTENT")
         return (
-            "What are you looking for?\n\n"
+            "💖 What are you looking for?\n\n"
             "1️⃣ Sugar mummy\n"
             "2️⃣ Sugar daddy\n"
             "3️⃣ Benten\n"
@@ -149,81 +164,60 @@ def handle_message(phone: str, text: str) -> str:
     if state == "GET_INTENT":
         intent = INTENT_MAP.get(msg)
         if not intent:
-            return "Please reply with a number (1–8)."
-
-        db_manager.upsert_profile(uid, "intent", intent)
-        db_manager.upsert_profile(uid, "preferred_gender", infer_gender(intent))
+            return "❗ Please choose a number between *1 – 8*."
+        db_manager.update_profile(uid, "intent", intent)
+        db_manager.update_profile(uid, "preferred_gender", infer_gender(intent))
         db_manager.set_state(uid, "GET_AGE_RANGE")
         return (
-            "Preferred age range:\n\n"
-            "1️⃣ 18-25\n"
-            "2️⃣ 26-30\n"
-            "3️⃣ 31-35\n"
-            "4️⃣ 36-40\n"
-            "5️⃣ 41-50\n"
+            "🎂 Preferred age range:\n\n"
+            "1️⃣ 18–25\n"
+            "2️⃣ 26–30\n"
+            "3️⃣ 31–35\n"
+            "4️⃣ 36–40\n"
+            "5️⃣ 41–50\n"
             "6️⃣ 50+"
         )
 
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r:
-            return "Choose a valid age range (1–6)."
-        db_manager.upsert_profile(uid, "age_min", r[0])
-        db_manager.upsert_profile(uid, "age_max", r[1])
+            return "❗ Please select a valid option *(1 – 6)*."
+        db_manager.update_profile(uid, "age_min", r[0])
+        db_manager.update_profile(uid, "age_max", r[1])
         db_manager.set_state(uid, "GET_NAME")
-        return "Your name?"
+        return "📝 What is your *name*?"
 
     if state == "GET_NAME":
-        db_manager.upsert_profile(uid, "name", msg)
+        db_manager.update_profile(uid, "name", msg)
         db_manager.set_state(uid, "GET_AGE")
-        return "Your age?"
+        return "🎂 How old are you?"
 
     if state == "GET_AGE":
         if not msg.isdigit():
-            return "Please enter a valid age."
-        db_manager.upsert_profile(uid, "age", int(msg))
+            return "❗ Please enter a valid age."
+        db_manager.update_profile(uid, "age", int(msg))
         db_manager.set_state(uid, "GET_LOCATION")
-        return "Your location?"
+        return "📍 Where are you located?"
 
     if state == "GET_LOCATION":
-        db_manager.upsert_profile(uid, "location", msg)
+        db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
-        return "Your phone number?"
+        return "📞 Enter your contact number:"
 
     if state == "GET_PHONE":
-        db_manager.upsert_profile(uid, "contact_phone", msg)
-
-        # --------------------------
-        # AI matching
-        # --------------------------
-        matches = db_manager.get_ai_matches(uid, limit=2)
+        db_manager.update_profile(uid, "contact_phone", msg)
+        matches = db_manager.get_matches(uid)
         db_manager.set_state(uid, "PAY")
 
         if not matches:
-            return "✅ Your profile is saved! No matches found yet. Check back later."
+            return (
+                "✅ Profile saved successfully!\n\n"
+                "🚫 No matches found yet.\n"
+                "We will notify you when new matches appear."
+            )
 
-        preview = "🔥 Top Matches:\n\n"
+        reply = "🔥 *Top Matches for You* 🔥\n\n"
         for m in matches:
-            preview += f"{m['name']} ({m.get('age','?')}) – {m.get('location','Unknown')} [{m.get('intent','?')}]\n"
-
-        preview += "\n💳 Pay $2 to unlock full contacts."
-        if matches[0].get("more_available"):
-            preview += "\n📌 There are more matches available!"
-
-        return preview
-
-    # --------------------------
-    # Payment / unlocked flow
-    # --------------------------
-    if state == "PAY":
-        # Check if user is active
-        if user.get("is_active", 0):
-            matches = db_manager.get_ai_matches(uid, limit=5)
-            msg_text = "✅ Contacts unlocked:\n\n"
-            for m in matches:
-                msg_text += f"{m['name']} ({m.get('age','?')}) – {m.get('location','Unknown')} [{m.get('intent','?')}]\n"
-            return msg_text
-        else:
-            return "💰 Reply *PAY* to unlock contact details."
-
-    return "⚠️ Unable to process your message. Please try again."
+            reply += f"• {m['name']} ({m['age']}) — {m['location']}\n"
+        reply += "\n💰 Pay *$2* to unlock contact details."
+        return reply
