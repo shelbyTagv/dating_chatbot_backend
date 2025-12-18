@@ -93,13 +93,14 @@ def get_user_by_phone(phone):
 
 def create_new_user(phone):
     c = conn()
-    cur = c.cursor()
-    cur.execute("INSERT INTO users (phone) VALUES (%s)", (phone,))
+    cur = c.cursor(dictionary=True)
+    cur.execute(
+        "INSERT INTO users (phone, chat_state) VALUES (%s, %s)",
+        (phone, "NEW")
+    )
     c.commit()
-    uid = cur.lastrowid
-    cur.close()
-    c.close()
-    return {"id": uid, "phone": phone, "chat_state": None, "is_paid": 0}
+    return get_user_by_phone(phone)
+
 
 def set_state(uid, state):
     c = conn()

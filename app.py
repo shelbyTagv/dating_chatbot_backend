@@ -197,6 +197,8 @@ def handle_message(phone, text):
     user = db_manager.get_user_by_phone(phone)
     if not user:
         user = db_manager.create_new_user(phone)
+    elif not user["chat_state"]:
+        db_manager.set_state(user["id"], "NEW")
 
     uid = user["id"]
 
