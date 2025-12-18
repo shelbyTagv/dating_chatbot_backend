@@ -215,7 +215,7 @@ def handle_message(phone, text):
     # ------------------------------
     # FLOW
     # ------------------------------
-    if state == "NEW":
+    if state == "":
         db_manager.reset_profile(uid)  # reset profile on new flow
         db_manager.set_state(uid, "GET_GENDER")
         return (

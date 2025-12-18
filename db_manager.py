@@ -219,3 +219,7 @@ def get_matches(uid, limit=2):
     cur.close()
     c.close()
     return rows[:limit]
+
+def set_gender(uid, gender):
+    update_profile(uid, "gender", gender)
+
