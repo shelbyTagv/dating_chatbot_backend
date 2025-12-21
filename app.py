@@ -279,7 +279,7 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "temp_contact_phone", msg)
         db_manager.update_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
-        db_manager.set_state(uid, "PAY")
+        db_manager.set_state(uid, "AWAITING_ECOCASH")
 
         if not matches:
             return (
@@ -290,12 +290,8 @@ def handle_message(phone: str, text: str) -> str:
         reply = "🔥 *Top Matches for You* 🔥\n\n"
         for m in matches:
             reply += f"• {m['name']} ({m['age']}) — {m['location']}\n"
-        reply += "\n💰 Pay *$2* to unlock contact details."
+        reply += "\n💰 Pay *$2* to unlock contact details, 💰 Enter your EcoCash number (e.g. 0779319913):"
         return reply
-
-    if state == "PAY":
-        db_manager.set_state(uid, "AWAITING_ECOCASH")
-        return "💰 Enter your EcoCash number (e.g. 0779319913):"
 
     if state == "AWAITING_ECOCASH":
         num = msg.replace("+263", "0").replace("263", "0")
