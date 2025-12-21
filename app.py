@@ -19,7 +19,7 @@ import db_manager
 app = FastAPI()
 
 # -------------------------------------------------
-# ENV VARIABLES
+# ENV
 # -------------------------------------------------
 GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
@@ -39,7 +39,7 @@ def startup():
     threading.Thread(target=poll_payments, daemon=True).start()
 
 # -------------------------------------------------
-# GREEN API SEND MESSAGE
+# WHATSAPP (GREEN API ONLY)
 # -------------------------------------------------
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
@@ -53,7 +53,7 @@ def send_whatsapp_message(phone: str, text: str):
         print("WhatsApp send error:", e)
 
 # -------------------------------------------------
-# PAYNOW HELPERS
+# PAYNOW UTILS
 # -------------------------------------------------
 VALID_PREFIXES = ["071","072","073","074","075","076","077","078","079"]
 
@@ -67,7 +67,6 @@ def generate_paynow_hash(values: dict) -> str:
 
 def create_paynow_payment(uid: int, phone: str):
     ref = f"ORDER-{uuid.uuid4().hex[:10]}"
-
     payload = {
         "id": PAYNOW_ID,
         "reference": ref,
@@ -83,7 +82,6 @@ def create_paynow_payment(uid: int, phone: str):
 
     try:
         r = requests.post(PAYNOW_URL, data=payload, timeout=20)
-
         poll_url = None
         for line in r.text.splitlines():
             if line.lower().startswith("pollurl="):
@@ -95,23 +93,20 @@ def create_paynow_payment(uid: int, phone: str):
 
         db_manager.create_payment(uid, ref, poll_url)
         return "📲 Check your phone and approve the EcoCash payment."
-
     except Exception as e:
-        print("Paynow request failed:", e)
+        print("Paynow error:", e)
         return None
 
 # -------------------------------------------------
-# PAYMENT POLLING (BACKGROUND)
+# PAYMENT POLLING
 # -------------------------------------------------
 def poll_payments():
     while True:
         try:
             pending = db_manager.get_pending_payments()
-
             for p in pending:
                 try:
                     r = requests.get(p["poll_url"], timeout=15)
-
                     if "paid" in r.text.lower():
                         db_manager.mark_payment_paid(p["id"])
                         db_manager.activate_user(p["user_id"])
@@ -124,10 +119,8 @@ def poll_payments():
                             msg += f"{m['name']} — {m['phone']}\n"
 
                         send_whatsapp_message(phone, msg)
-
                 except Exception as e:
-                    print("Polling payment error:", e)
-
+                    print("Polling error:", e)
         except Exception as outer:
             print("Polling loop error:", outer)
 
@@ -147,17 +140,10 @@ async def webhook(request: Request):
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
-    phone = payload.get("senderData", {}).get("chatId", "").split("@")[0]
+    phone = payload["senderData"]["chatId"].split("@")[0]
+    text = payload["messageData"]["textMessageData"]["textMessage"].strip()
 
-    msg_data = payload.get("messageData", {})
-    text = (
-        msg_data.get("textMessageData", {}).get("textMessage")
-        or msg_data.get("extendedTextMessageData", {}).get("text")
-        or ""
-    ).strip()
-
-    if not phone or not text:
-        return JSONResponse({"status": "ignored"})
+    
 
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
@@ -282,12 +268,16 @@ def handle_message(phone: str, text: str) -> str:
 
     if state == "GET_PHONE":
         db_manager.update_profile(uid, "temp_contact_phone", msg)
-        db_manager.update_embedding(uid)
+        # Also save to actual contact column for matching
+        db_manager.update_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
         db_manager.set_state(uid, "PAY")
 
         if not matches:
-            return "✅ Profile saved!\n\n🚫 No matches found yet."
+            return (
+                "✅ Profile saved!\n\n"
+                "🚫 No matches found yet."
+            )
 
         reply = "🔥 *Top Matches for You* 🔥\n\n"
         for m in matches:
