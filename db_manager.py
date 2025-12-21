@@ -313,3 +313,29 @@ Return only a Python list of user IDs, e.g., [3, 7, 15].
     cur.close()
     c.close()
     return top_matches
+
+
+def update_embedding(uid):
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (uid,))
+    p = cur.fetchone()
+    if not p:
+        cur.close()
+        c.close()
+        return
+
+    # Build the profile text as needed
+    text = f"{p.get('name','')} {p.get('bio','')} {p.get('interests','')}"
+    emb = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
+    ).data[0].embedding
+
+    cur.execute(
+        "UPDATE profiles SET embedding=%s WHERE user_id=%s",
+        (json.dumps(emb), uid)
+    )
+    c.commit()
+    cur.close()
+    c.close()
