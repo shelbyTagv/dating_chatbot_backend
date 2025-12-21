@@ -100,7 +100,6 @@ def create_paynow_payment(uid: int, phone: str):
     
     # 2. Sign the string using your Integration Key (or Encryption Key)
     signature = hmac.new(
-        integration_key.encode('utf-8'),
         encryption_key.encode('utf-8'),
         payload_string.encode('utf-8'),
         hashlib.sha256
@@ -121,7 +120,7 @@ def create_paynow_payment(uid: int, phone: str):
             timeout=15
         )
 
-        if r.status_code != 200:
+        if r.status_code not in (200, 201):
             print("PesePay error:", r.status_code, r.text)
             return None
 
