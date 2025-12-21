@@ -272,3 +272,35 @@ def haversine(lat1, lon1, lat2, lon2):
     dlat = lat2-lat1
     a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
     return 6371 * 2 * asin(sqrt(a))
+
+
+# -------------------------------------------------
+# RESET PROFILE (REQUIRED BY app.py)
+# -------------------------------------------------
+def reset_profile(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        UPDATE profiles SET
+            gender = NULL,
+            name = NULL,
+            age = NULL,
+            location = NULL,
+            intent = NULL,
+            preferred_gender = NULL,
+            age_min = NULL,
+            age_max = NULL,
+            contact_phone = NULL,
+            temp_contact_phone = NULL,
+            bio = NULL,
+            hobbies = NULL,
+            personality_traits = NULL,
+            embedding = NULL,
+            latitude = NULL,
+            longitude = NULL
+        WHERE user_id = %s
+    """, (uid,))
+    c.commit()
+    cur.close()
+    c.close()
+
