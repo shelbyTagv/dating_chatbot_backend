@@ -191,6 +191,9 @@ def infer_gender(intent):
     if intent in ["boyfriend", "benten", "sugar daddy"]:
         return "male"
     return "any"
+def auto_preferred_gender(user_gender: str) -> str:
+    return "female" if user_gender == "male" else "male"
+
 
 # -------------------------------------------------
 # CHAT HANDLER
@@ -239,19 +242,31 @@ def handle_message(phone: str, text: str) -> str:
             "4️⃣ Girlfriend\n5️⃣ Boyfriend\n6️⃣ 1 night stand\n"
             "7️⃣ Just vibes\n8️⃣ Friend"
         )
-
+    
     if state == "GET_INTENT":
         intent = INTENT_MAP.get(msg)
         if not intent:
             return "❗ Choose a number (1–8)."
+
+        # save intent
         db_manager.update_profile(uid, "intent", intent)
-        db_manager.update_profile(uid, "preferred_gender", infer_gender(intent))
+
+        # fetch gender from DB
+        gender = db_manager.get_user_gender(uid)
+        if not gender:
+            return "❌ Gender not set. Please restart by typing EXIT."
+
+    # auto-derive preferred gender (strict opposite)
+        preferred_gender = "female" if gender == "male" else "male"
+        db_manager.update_profile(uid, "preferred_gender", preferred_gender)
+
         db_manager.set_state(uid, "GET_AGE_RANGE")
         return (
             "🎂 Preferred age range:\n\n"
             "1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n"
             "4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
         )
+    
 
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)

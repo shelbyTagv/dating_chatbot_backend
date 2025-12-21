@@ -8,6 +8,23 @@ from datetime import datetime
 from math import radians, cos, sin, asin, sqrt
 from openai import OpenAI
 
+
+INTENT_COMPATIBILITY = {
+    "boyfriend": "girlfriend",
+    "girlfriend": "boyfriend",
+
+    "sugar mummy": "benten",
+    "benten": "sugar mummy",
+
+    "sugar daddy": "sugar baby",
+    "sugar baby": "sugar daddy",
+
+    "1 night stand": "1 night stand",
+    "friends": "friends",
+    "just vibes": "just vibes",
+}
+
+
 # -------------------------------------------------
 # OPENAI
 # -------------------------------------------------
@@ -248,6 +265,7 @@ def reset_profile(uid):
 # -------------------------------------------------
 # MATCHING (AI-BASED WITHOUT EMBEDDINGS)
 # -------------------------------------------------
+
 def get_matches(user_id):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -257,62 +275,27 @@ def get_matches(user_id):
     if not user:
         return []
 
-    # fetch all other candidates
     cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
     candidates = cur.fetchall()
-    if not candidates:
-        return []
 
-    # compute distance for each
+    matches = []
+
     for cand in candidates:
-        cand['distance_km'] = compute_distance(
-            user.get('latitude'),
-            user.get('longitude'),
-            cand.get('latitude'),
-            cand.get('longitude')
-        )
+        if not gender_match(user, cand):
+            continue
 
-    # prepare candidate descriptions outside f-string
-    candidate_texts = []
-    for cand in candidates:
-        candidate_texts.append(
-            f"ID: {cand['user_id']}, Age: {cand['age']}, Gender: {cand['gender']}, Preferred Gender: {cand.get('preferred_gender','')}, Distance: {cand.get('distance_km','Unknown')}, Bio: {cand.get('bio','')}, Hobbies: {cand.get('hobbies','')}, Personality: {cand.get('personality_traits','')}"
-        )
+        if not age_match(user, cand):
+            continue
 
-    # join outside f-string to avoid backslash inside {}
-    candidates_joined = "\n".join(candidate_texts)
+        if not intent_match(user, cand):
+            continue
 
-    prompt = f"""
-You are an AI matchmaking assistant. Current user is a {user['age']} year old {user['gender']} who prefers {user.get('preferred_gender','')}.
-
-Here are the candidate profiles:
-{candidates_joined}
-
-Choose and rank the top 3 matches purely based on compatibility, age preference, preferred gender, and proximity.  
-Return only a Python list of user IDs, e.g., [3, 7, 15].
-"""
-
-    try:
-        response = client.chat.completions.create(
-            model="gpt-4o-mini",
-            messages=[{"role": "user", "content": prompt}],
-            temperature=0.3
-        )
-        top_ids = eval(response.choices[0].message['content'])
-    except Exception:
-        top_ids = [cand['user_id'] for cand in candidates[:3]]
-
-    # fetch full profiles of top matches
-    if top_ids:
-        format_ids = ",".join(str(i) for i in top_ids)
-        cur.execute(f"SELECT * FROM profiles WHERE user_id IN ({format_ids})")
-        top_matches = cur.fetchall()
-    else:
-        top_matches = []
+        matches.append(cand)
 
     cur.close()
     c.close()
-    return top_matches
+
+    return matches[:3]
 
 def get_user_phone(uid):
     c = conn()
@@ -322,6 +305,29 @@ def get_user_phone(uid):
     cur.close()
     c.close()
     return row[0] if row else None
+
+def opposite_gender(g):
+    return "female" if g == "male" else "male"
+
+
+def gender_match(user, cand):
+    return (
+        cand["gender"] == opposite_gender(user["gender"]) and
+        cand["preferred_gender"] == user["gender"]
+    )
+
+def age_match(user, cand):
+    return (
+        user["age_min"] <= cand["age"] <= user["age_max"] and
+        cand["age_min"] <= user["age"] <= cand["age_max"]
+    )
+
+def intent_match(user, cand):
+    return INTENT_COMPATIBILITY.get(user["intent"]) == cand["intent"]
+
+
+
+
 
 
 
