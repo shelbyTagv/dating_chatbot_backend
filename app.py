@@ -32,7 +32,7 @@ GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 #PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
 
 # Example for sandbox testing
-PESEPAY_API_URL = "https://sandbox-api.pesepay.com/api/payments-engine/v1/payments"
+PESEPAY_API_URL = "https://sandbox-api.pesepay.com/api/v1/payments"
 PESEPAY_INTEGRATION_KEY = os.getenv("PESEPAY_INTEGRATION_KEY")
 
 RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
