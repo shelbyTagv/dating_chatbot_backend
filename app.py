@@ -339,6 +339,7 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "temp_contact_phone", num)
         res = create_paynow_payment(uid, num)
         if not res:
+            db_manager.set_state(uid, "NEW")
             return "❌ Payment initiation failed."
         db_manager.set_state(uid, "PAYMENT_PENDING")
         return res + "\n\n⏳ Waiting for confirmation..."
