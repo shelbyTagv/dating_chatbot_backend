@@ -220,7 +220,7 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.reset_profile(uid)
         db_manager.set_state(uid, "GET_GENDER")
         return (
-            "👋 Welcome to Shelby Date connections!\n\n"
+            "👋 Welcome to Shelby Date connections! Where you can find love in the comfort of your home: Your Privacy is our concern\n\n"
             "Please tell us your gender:\n"
             "• MALE\n• FEMALE\n• OTHER"
         )
@@ -301,10 +301,14 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "AWAITING_ECOCASH")
 
         if not matches:
+            db_manager.set_state(uid, "NEW")
             return (
                 "✅ Profile saved!\n\n"
-                "🚫 No matches found yet."
+                "🚫 No matches found yet. Please check again Later\n\n"
+                "🔄 Conversation ended.\n"
+                "Type *HELLO* anytime to start again."
             )
+
 
         reply = "🔥 *Top Matches for You* 🔥\n\n"
         for m in matches:
