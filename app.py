@@ -39,7 +39,7 @@ def startup():
     threading.Thread(target=poll_payments, daemon=True).start()
 
 # -------------------------------------------------
-# WHATSAPP (GREEN API ONLY)
+# WHATSAPP (GREEN API)
 # -------------------------------------------------
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
@@ -143,8 +143,6 @@ async def webhook(request: Request):
     phone = payload["senderData"]["chatId"].split("@")[0]
     text = payload["messageData"]["textMessageData"]["textMessage"].strip()
 
-    
-
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
 
@@ -181,7 +179,7 @@ def infer_gender(intent):
     return "any"
 
 # -------------------------------------------------
-# CHAT HANDLER (UNCHANGED UX)
+# CHAT HANDLER
 # -------------------------------------------------
 def handle_message(phone: str, text: str) -> str:
     msg = text.strip()
@@ -268,7 +266,6 @@ def handle_message(phone: str, text: str) -> str:
 
     if state == "GET_PHONE":
         db_manager.update_profile(uid, "temp_contact_phone", msg)
-        # Also save to actual contact column for matching
         db_manager.update_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
         db_manager.set_state(uid, "PAY")
