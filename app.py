@@ -71,67 +71,84 @@ def validate_ecocash_number(num: str) -> bool:
 def create_paynow_payment(uid: int, phone: str):
     transaction_id = f"TX-{uuid.uuid4().hex[:10]}"
 
-
     integration_key = os.getenv("PESEPAY_INTEGRATION_KEY")
     encryption_key = os.getenv("PESEPAY_ENCRYPTION_KEY")
 
-    return_url = os.getenv("PAYNOW_RETURN_URL")  # User sees this after payment
-    result_url = os.getenv("PAYNOW_RESULT_URL")  # Server-to-server webhook
-
     if not integration_key or not encryption_key:
-        print("❌ ERROR: PesePay keys are missing in Environment Variables!")
+        print("❌ ERROR: Missing PesePay environment variables")
         return None
 
     payload = {
         "amount": 2.00,
         "currencyCode": "USD",
-        "paymentMethodCode": "ECOCASH",
         "reason": "Shelby Date Connection Fee",
-        "customerPhone": phone,
         "reference": transaction_id,
-        "merchantUserId": str(uid),         # Pass UID so webhook can identify user
-        "returnUrl": return_url,
-        "resultUrl": result_url
+        "merchantUserId": str(uid),
+        "returnUrl": RETURN_URL,
+        "resultUrl": RESULT_URL
     }
 
-    # --- HMAC SIGNATURE GENERATION ---
-    # 1. Convert payload to a JSON string (no spaces, sorted keys for consistency)
-    payload_string = json.dumps(payload, separators=(',', ':'), sort_keys=True)
-    
-    # 2. Sign the string using your Integration Key (or Encryption Key)
+    # ---- SIGN PAYLOAD ----
+    payload_string = json.dumps(
+        payload,
+        separators=(",", ":"),
+        sort_keys=True
+    )
+
     signature = hmac.new(
-        encryption_key.encode('utf-8'),
-        payload_string.encode('utf-8'),
+        encryption_key.encode("utf-8"),
+        payload_string.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
 
     headers = {
+        "Authorization": f"Bearer {integration_key}",
+        "X-Signature": signature,
         "Content-Type": "application/json",
-        "Authorization": f"Bearer {integration_key}", # Still need the key
-        "X-Signature": signature,                     # Add the signature header
         "Accept": "application/json"
     }
 
     try:
-        r = requests.post(
+        response = requests.post(
             PESEPAY_API_URL,
             json=payload,
             headers=headers,
             timeout=15
         )
 
-        if r.status_code not in (200, 201):
-            print("PesePay error:", r.status_code, r.text)
+        print("PesePay STATUS:", response.status_code)
+        print("PesePay RESPONSE:", response.text)
+
+        if response.status_code not in (200, 201):
             return None
 
-        # save transaction
+        data = response.json()
+
+        if not data.get("success"):
+            print("❌ PesePay rejected request:", data)
+            return None
+
+        checkout_url = (
+            data.get("checkoutUrl")
+            or data.get("redirectUrl")
+            or data.get("data", {}).get("checkoutUrl")
+        )
+
+        if not checkout_url:
+            print("❌ No checkout URL returned by PesePay")
+            return None
+
+        # Save transaction locally
         db_manager.create_payment(uid, transaction_id, None)
 
-        return "📲 Check your phone and enter your EcoCash PIN to confirm payment."
+        # ✅ RETURN CHECKOUT LINK
+        return checkout_url
 
     except Exception as e:
-        print("PesePay exception:", e)
+        print("❌ PesePay exception:", str(e))
         return None
+
+
 
 
 # -------------------------------------------------
@@ -361,22 +378,25 @@ def handle_message(phone: str, text: str) -> str:
             return "❌ Invalid EcoCash number."
         db_manager.update_profile(uid, "temp_contact_phone", num)
         res = create_paynow_payment(uid, num)
+
         if not res:
-    # 1. Clear the faulty data
             db_manager.update_profile(uid, "temp_contact_phone", None)
-    
-    # 2. Reset back to the payment menu so they can choose a different method
-            db_manager.set_state(uid, "NEW") 
+            db_manager.set_state(uid, "NEW")
 
             return (
-                "❌ We couldn't start the EcoCash transaction.\n\n"
-                "Possible reasons:\n"
-                "• Insufficient funds\n"
-                "• Paynow is currently down\n"
-                "• Network issues\n\n"
-                "Type 'Hello' to try again."
-            )
-        return res + "\n\n⏳ Waiting for confirmation..."
+                "❌ We couldn't start the payment.\n\n"
+                "Please try again later.\n\n"
+                "Type *HELLO* to restart."
+            )   
+
+        return (
+            "💳 *Complete Your Payment*\n\n"
+            "👇 Click the link below:\n"
+            f"{res}\n\n"
+            "Select *EcoCash* and confirm with your PIN.\n"
+            "⏳ Waiting for confirmation..."
+        )
+   
 
     if state == "PAYMENT_PENDING":
         return "⏳ Waiting for EcoCash payment confirmation..."
