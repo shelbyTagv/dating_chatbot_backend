@@ -33,6 +33,9 @@ PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
 PESEPAY_API_URL = "https://api.pesepay.com/api/payments-engine/v1/payments"
 PESEPAY_INTEGRATION_KEY = os.getenv("PESEPAY_INTEGRATION_KEY")
 
+RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
+RESULT_URL = os.getenv("PAYNOW_RESULT_URL")
+
 
 # -------------------------------------------------
 # STARTUP
@@ -67,12 +70,18 @@ def validate_ecocash_number(num: str) -> bool:
 def create_paynow_payment(uid: int, phone: str):
     transaction_id = f"TX-{uuid.uuid4().hex[:10]}"
 
+    return_url = os.getenv("PAYNOW_RETURN_URL")  # User sees this after payment
+    result_url = os.getenv("PAYNOW_RESULT_URL")  # Server-to-server webhook
+
     payload = {
         "amount": 2,
         "currencyCode": "USD",
         "paymentMethodCode": "ECOCASH",
         "customerPhone": phone,
-        "reference": transaction_id
+        "reference": transaction_id,
+        "merchantUserId": uid,         # Pass UID so webhook can identify user
+        "returnUrl": return_url,
+        "resultUrl": result_url
     }
 
     headers = {
@@ -89,7 +98,7 @@ def create_paynow_payment(uid: int, phone: str):
         )
 
         if r.status_code != 200:
-            print("PesePay error:", r.text)
+            print("PesePay error:", r.status_code, r.text)
             return None
 
         # save transaction
