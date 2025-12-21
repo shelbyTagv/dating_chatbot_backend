@@ -10,19 +10,16 @@ from openai import OpenAI
 
 
 INTENT_COMPATIBILITY = {
-    "boyfriend": "girlfriend",
-    "girlfriend": "boyfriend",
-
-    "sugar mummy": "benten",
-    "benten": "sugar mummy",
-
-    "sugar daddy": "sugar baby",
-    "sugar baby": "sugar daddy",
-
-    "1 night stand": "1 night stand",
-    "friends": "friends",
-    "just vibes": "just vibes",
+    "girlfriend": ["boyfriend"],
+    "boyfriend": ["girlfriend"],
+    "sugar mummy": ["sugar daddy"],
+    "sugar daddy": ["sugar mummy"],
+    "1 night stand": ["1 night stand", "just vibes"],
+    "just vibes": ["1 night stand", "just vibes"],
+    "friend": ["friend"],
+    "benten": ["benten"]
 }
+
 
 
 # -------------------------------------------------
@@ -275,6 +272,8 @@ def reset_profile(uid):
 # MATCHING (AI-BASED WITHOUT EMBEDDINGS)
 # -------------------------------------------------
 
+import random
+
 def get_matches(user_id):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -286,25 +285,25 @@ def get_matches(user_id):
 
     cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
     candidates = cur.fetchall()
+    cur.close()
+    c.close()
 
     matches = []
 
     for cand in candidates:
         if not gender_match(user, cand):
             continue
-
         if not age_match(user, cand):
             continue
-
         if not intent_match(user, cand):
             continue
-
         matches.append(cand)
 
-    cur.close()
-    c.close()
+    # Randomly pick top 2 matches
+    if matches:
+        matches = random.sample(matches, min(2, len(matches)))
 
-    return matches[:3]
+    return matches
 
 def get_user_phone(uid):
     c = conn()
@@ -320,10 +319,10 @@ def opposite_gender(g):
 
 
 def gender_match(user, cand):
-    return (
-        cand["gender"] == opposite_gender(user["gender"]) and
-        cand["preferred_gender"] == user["gender"]
-    )
+    user_pref = user.get("preferred_gender") or opposite_gender(user["gender"])
+    cand_pref = cand.get("preferred_gender") or opposite_gender(cand["gender"])
+    return cand["gender"] == user_pref and cand_pref == user["gender"]
+
 
 def age_match(user, cand):
     return (
@@ -332,7 +331,9 @@ def age_match(user, cand):
     )
 
 def intent_match(user, cand):
-    return INTENT_COMPATIBILITY.get(user["intent"]) == cand["intent"]
+    compatible = INTENT_COMPATIBILITY.get(user["intent"], [])
+    return cand["intent"] in compatible
+
 
 
 
