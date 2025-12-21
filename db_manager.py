@@ -18,6 +18,47 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # -------------------------------------------------
 _pool = None
 
+
+
+# -------------------------------------------------
+# PAYMENTS
+# -------------------------------------------------
+def create_payment(uid, reference, poll_url):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        INSERT INTO payments (user_id, reference, poll_url)
+        VALUES (%s, %s, %s)
+    """, (uid, reference, poll_url))
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_pending_payments():
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("""
+        SELECT * FROM payments
+        WHERE paid = 0
+    """)
+    rows = cur.fetchall()
+    cur.close()
+    c.close()
+    return rows
+
+def mark_payment_paid(payment_id):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        UPDATE payments
+        SET paid = 1, paid_at = %s
+        WHERE id = %s
+    """, (datetime.utcnow(), payment_id))
+    c.commit()
+    cur.close()
+    c.close()
+
+
 def conn():
     global _pool
     if not _pool:
