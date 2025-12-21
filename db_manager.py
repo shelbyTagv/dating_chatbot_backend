@@ -304,3 +304,80 @@ def reset_profile(uid):
     cur.close()
     c.close()
 
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# Haversine formula to compute distance in km
+def compute_distance(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2):
+        return None
+    R = 6371  # Earth radius in km
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
+    c = 2*asin(sqrt(a))
+    return R*c
+
+def get_matches(user_id):
+    c = conn()  # use your existing connection function
+    cur = c.cursor(dictionary=True)
+
+    # get current user profile
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
+    user = cur.fetchone()
+    if not user:
+        return []
+
+    # fetch all other users (exclude self)
+    cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
+    candidates = cur.fetchall()
+    if not candidates:
+        return []
+
+    # compute distances
+    for cand in candidates:
+        cand['distance_km'] = compute_distance(
+            user.get('latitude'),
+            user.get('longitude'),
+            cand.get('latitude'),
+            cand.get('longitude')
+        )
+
+    # prepare candidate description for AI
+    candidate_texts = []
+    for cand in candidates:
+        text = f"ID: {cand['user_id']}, Age: {cand['age']}, Gender: {cand['gender']}, Preferred Gender: {cand.get('preferred_gender','')}, City: {cand.get('city','')}, Distance: {cand.get('distance_km','Unknown')}, Bio: {cand.get('bio','')}, Hobbies: {cand.get('hobbies','')}, Personality: {cand.get('personality_traits','')}"
+        candidate_texts.append(text)
+
+    prompt = f"""
+    You are an AI matchmaking assistant. Current user is a {user['age']} year old {user['gender']} who prefers {user.get('preferred_gender','')}.
+
+    Here are the candidate profiles:
+    {'\n'.join(candidate_texts)}
+
+    Choose and rank the top 3 matches purely based on compatibility, age preference, preferred gender, and proximity.  
+    Return only a Python list of user IDs, e.g., [3, 7, 15].
+    """
+
+    try:
+        response = client.chat.completions.create(
+            model="gpt-4o-mini",
+            messages=[{"role": "user", "content": prompt}],
+            temperature=0.3
+        )
+        top_ids = eval(response.choices[0].message['content'])
+    except Exception:
+        top_ids = [cand['user_id'] for cand in candidates[:3]]  # fallback
+
+    # fetch full profiles of top matches
+    if top_ids:
+        format_ids = ",".join(str(i) for i in top_ids)
+        cur.execute(f"SELECT * FROM profiles WHERE user_id IN ({format_ids})")
+        top_matches = cur.fetchall()
+    else:
+        top_matches = []
+
+    cur.close()
+    c.close()
+    return top_matches
+
+
