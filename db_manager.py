@@ -199,6 +199,15 @@ def activate_user(uid):
     cur.close()
     c.close()
 
+def get_user_gender(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    return row[0] if row else None
+
 # -------------------------------------------------
 # PROFILE
 # -------------------------------------------------
@@ -324,6 +333,7 @@ def age_match(user, cand):
 
 def intent_match(user, cand):
     return INTENT_COMPATIBILITY.get(user["intent"]) == cand["intent"]
+
 
 
 
