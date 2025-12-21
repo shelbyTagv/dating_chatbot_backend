@@ -271,23 +271,9 @@ def handle_message(phone: str, text: str) -> str:
         return "📍 Where are you located?"
 
     if state == "GET_LOCATION":
-    # Ask user to share location or type coordinates
-        db_manager.set_state(uid, "GET_HOBBIES")
-        return (
-        "📍 Please share your location on the map or type your city/town name.\n"
-        "If possible, send coordinates as 'latitude,longitude' for better matches."
-    )
-
-    if state == "GET_HOBBIES":
-            db_manager.update_profile(uid, "hobbies", msg)
-            db_manager.set_state(uid, "GET_PERSONALITY")
-            return "📝 Tell us a few personality traits about yourself (e.g., funny, adventurous, caring)."
-
-    if state == "GET_PERSONALITY":
-        db_manager.update_profile(uid, "personality_traits", msg)
+        db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
         return "📞 Enter your contact number:"
-
 
     if state == "GET_PHONE":
         db_manager.update_profile(uid, "temp_contact_phone", msg)
@@ -306,6 +292,7 @@ def handle_message(phone: str, text: str) -> str:
             reply += f"• {m['name']} ({m['age']}) — {m['location']}\n"
         reply += "\n💰 Pay *$2* to unlock contact details, 💰 Enter your EcoCash number (e.g. 0779319913):"
         return reply
+
 
     if state == "AWAITING_ECOCASH":
         num = msg.replace("+263", "0").replace("263", "0")
