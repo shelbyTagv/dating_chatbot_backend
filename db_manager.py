@@ -283,12 +283,12 @@ def get_matches(user_id):
     candidates_joined = "\n".join(candidate_texts)
 
     prompt = f"""
-You are an AI matchmaking assistant. Current user is a {user['age']} year old {user['gender']} who prefers {user.get('preferred_gender','')}.
+You are an AI matchmaking assistant, this is a dating App system. You have to find the curret user matches that they can date in the database. Current user is a {user['age']} year old {user['gender']} who prefers {user.get('preferred_gender','')}.
 
 Here are the candidate profiles:
 {candidates_joined}
 
-Choose and rank the top 3 matches purely based on compatibility, age preference, preferred gender, and proximity.  
+Choose and rank the top 3 matches purely based on compatibility, age preference, preferred gender, and proximity.  for example if current user preffered genter is Male, return candidates with gender. do the match making for age and location
 Return only a Python list of user IDs, e.g., [3, 7, 15].
 """
 
