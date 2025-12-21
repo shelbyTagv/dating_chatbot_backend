@@ -6,7 +6,8 @@ import uuid
 import time
 import threading
 import hashlib
-import requests
+import requests, hmac, json
+
 
 from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
@@ -70,23 +71,42 @@ def validate_ecocash_number(num: str) -> bool:
 def create_paynow_payment(uid: int, phone: str):
     transaction_id = f"TX-{uuid.uuid4().hex[:10]}"
 
+
+    integration_key = os.getenv("PESEPAY_INTEGRATION_KEY")
+    encryption_key = os.getenv("PESEPAY_ENCRYPTION_KEY")
+
     return_url = os.getenv("PAYNOW_RETURN_URL")  # User sees this after payment
     result_url = os.getenv("PAYNOW_RESULT_URL")  # Server-to-server webhook
 
     payload = {
-        "amount": 2,
+        "amount": 2.00,
         "currencyCode": "USD",
         "paymentMethodCode": "ECOCASH",
+        "reason": "Shelby Date Connection Fee",
         "customerPhone": phone,
         "reference": transaction_id,
-        "merchantUserId": uid,         # Pass UID so webhook can identify user
+        "merchantUserId": str(uid),         # Pass UID so webhook can identify user
         "returnUrl": return_url,
         "resultUrl": result_url
     }
 
+    # --- HMAC SIGNATURE GENERATION ---
+    # 1. Convert payload to a JSON string (no spaces, sorted keys for consistency)
+    payload_string = json.dumps(payload, separators=(',', ':'), sort_keys=True)
+    
+    # 2. Sign the string using your Integration Key (or Encryption Key)
+    signature = hmac.new(
+        integration_key.encode('utf-8'),
+        encryption_key.encode('utf-8'),
+        payload_string.encode('utf-8'),
+        hashlib.sha256
+    ).hexdigest()
+
     headers = {
-        "Authorization": f"Bearer {PESEPAY_INTEGRATION_KEY}",
-        "Content-Type": "application/json"
+        "Content-Type": "application/json",
+        "Authorization": f"Bearer {integration_key}", # Still need the key
+        "X-Signature": signature,                     # Add the signature header
+        "Accept": "application/json"
     }
 
     try:
