@@ -30,13 +30,16 @@ PAYNOW_ID = os.getenv("PAYNOW_ID")
 PAYNOW_KEY = os.getenv("PAYNOW_KEY")
 PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
 
+PESEPAY_API_URL = "https://api.pesepay.com/api/payments-engine/v1/payments"
+PESEPAY_INTEGRATION_KEY = os.getenv("PESEPAY_INTEGRATION_KEY")
+
+
 # -------------------------------------------------
 # STARTUP
 # -------------------------------------------------
 @app.on_event("startup")
 def startup():
     db_manager.init_db()
-    threading.Thread(target=poll_payments, daemon=True).start()
 
 # -------------------------------------------------
 # WHATSAPP (GREEN API)
@@ -64,6 +67,44 @@ def generate_paynow_hash(values: dict) -> str:
     s = "".join(str(values[k]) for k in sorted(values.keys()))
     s += PAYNOW_KEY
     return hashlib.sha512(s.encode()).hexdigest().upper()
+
+def create_paynow_payment(uid: int, phone: str):
+    transaction_id = f"TX-{uuid.uuid4().hex[:10]}"
+
+    payload = {
+        "amount": 2,
+        "currencyCode": "USD",
+        "paymentMethodCode": "ECOCASH",
+        "customerPhone": phone,
+        "reference": transaction_id
+    }
+
+    headers = {
+        "Authorization": f"Bearer {PESEPAY_INTEGRATION_KEY}",
+        "Content-Type": "application/json"
+    }
+
+    try:
+        r = requests.post(
+            PESEPAY_API_URL,
+            json=payload,
+            headers=headers,
+            timeout=15
+        )
+
+        if r.status_code != 200:
+            print("PesePay error:", r.text)
+            return None
+
+        # save transaction
+        db_manager.create_payment(uid, transaction_id, None)
+
+        return "📲 Check your phone and enter your EcoCash PIN to confirm payment."
+
+    except Exception as e:
+        print("PesePay exception:", e)
+        return None
+
 
 def create_paynow_payment(uid: int, phone: str):
     ref = f"ORDER-{uuid.uuid4().hex[:10]}"
@@ -97,38 +138,39 @@ def create_paynow_payment(uid: int, phone: str):
         print("Paynow error:", e)
         return None
 
-# -------------------------------------------------
-# PAYMENT POLLING
-# -------------------------------------------------
-def poll_payments():
-    while True:
-        try:
-            pending = db_manager.get_pending_payments()
-            for p in pending:
-                try:
-                    r = requests.get(p["poll_url"], timeout=15)
-                    if "paid" in r.text.lower():
-                        db_manager.mark_payment_paid(p["id"])
-                        db_manager.activate_user(p["user_id"])
-
-                        phone = db_manager.get_user_phone(p["user_id"])
-                        matches = db_manager.get_matches(p["user_id"])
-
-                        msg = "✅ *Payment Confirmed!*\n\n📞 Contact details:\n\n"
-                        for m in matches:
-                            msg += f"{m['name']} — {m['phone']}\n"
-
-                        send_whatsapp_message(phone, msg)
-                except Exception as e:
-                    print("Polling error:", e)
-        except Exception as outer:
-            print("Polling loop error:", outer)
-
-        time.sleep(20)
 
 # -------------------------------------------------
 # WEBHOOK (GREEN API)
 # -------------------------------------------------
+@app.post("/pesepay/webhook")
+async def pesepay_webhook(request: Request):
+    data = await request.json()
+
+    if data.get("status") != "SUCCESS":
+        return {"status": "ignored"}
+
+    transaction_id = data.get("reference")
+    uid = data.get("merchantUserId")
+
+    if not transaction_id or not uid:
+        return {"status": "invalid"}
+
+    db_manager.mark_payment_paid(transaction_id)
+
+    phone = db_manager.get_user_phone(uid)
+    matches = db_manager.get_matches(uid)
+
+    msg = "✅ *Payment Confirmed!*\n\n📞 Contact details:\n\n"
+    for m in matches:
+        msg += f"{m['name']} — {m['contact_phone']}\n"
+
+    send_whatsapp_message(phone, msg)
+
+    # terminate chat
+    db_manager.set_state(uid, "NEW")
+
+    return {"status": "ok"}
+
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
