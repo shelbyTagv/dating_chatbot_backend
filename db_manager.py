@@ -18,7 +18,19 @@ client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 # -------------------------------------------------
 _pool = None
 
-
+def conn():
+    global _pool
+    if not _pool:
+        _pool = mysql.connector.pooling.MySQLConnectionPool(
+            pool_name="dating_pool",
+            pool_size=10,
+            host=os.getenv("MYSQLHOST"),
+            user=os.getenv("MYSQLUSER"),
+            password=os.getenv("MYSQLPASSWORD"),
+            database=os.getenv("MYSQL_DATABASE"),
+            port=int(os.getenv("MYSQL_PORT", 3306)),
+        )
+    return _pool.get_connection()
 
 # -------------------------------------------------
 # PAYMENTS
@@ -37,10 +49,7 @@ def create_payment(uid, reference, poll_url):
 def get_pending_payments():
     c = conn()
     cur = c.cursor(dictionary=True)
-    cur.execute("""
-        SELECT * FROM payments
-        WHERE paid = 0
-    """)
+    cur.execute("SELECT * FROM payments WHERE paid = 0")
     rows = cur.fetchall()
     cur.close()
     c.close()
@@ -49,29 +58,11 @@ def get_pending_payments():
 def mark_payment_paid(payment_id):
     c = conn()
     cur = c.cursor()
-    cur.execute("""
-        UPDATE payments
-        SET paid = 1, paid_at = %s
-        WHERE id = %s
-    """, (datetime.utcnow(), payment_id))
+    cur.execute("UPDATE payments SET paid = 1, paid_at = %s WHERE id = %s",
+                (datetime.utcnow(), payment_id))
     c.commit()
     cur.close()
     c.close()
-
-
-def conn():
-    global _pool
-    if not _pool:
-        _pool = mysql.connector.pooling.MySQLConnectionPool(
-            pool_name="dating_pool",
-            pool_size=10,
-            host=os.getenv("MYSQLHOST"),
-            user=os.getenv("MYSQLUSER"),
-            password=os.getenv("MYSQLPASSWORD"),
-            database=os.getenv("MYSQL_DATABASE"),
-            port=int(os.getenv("MYSQL_PORT", 3306)),
-        )
-    return _pool.get_connection()
 
 # -------------------------------------------------
 # COLUMN CHECK HELPER
@@ -93,7 +84,6 @@ def init_db():
     c = conn()
     cur = c.cursor()
 
-    # ---------------- USERS ----------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -106,7 +96,6 @@ def init_db():
     if not column_exists(cur, "users", "paid_at"):
         cur.execute("ALTER TABLE users ADD paid_at DATETIME")
 
-    # ---------------- PROFILES ----------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS profiles (
             user_id INT PRIMARY KEY,
@@ -127,7 +116,6 @@ def init_db():
         "bio": "TEXT",
         "hobbies": "TEXT",
         "personality_traits": "TEXT",
-        "embedding": "JSON",
         "latitude": "DECIMAL(9,6)",
         "longitude": "DECIMAL(9,6)",
         "temp_contact_phone": "VARCHAR(20)"
@@ -137,7 +125,6 @@ def init_db():
         if not column_exists(cur, "profiles", col):
             cur.execute(f"ALTER TABLE profiles ADD {col} {col_type}")
 
-    # ---------------- PAYMENTS ----------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -189,11 +176,8 @@ def set_state(uid, state):
 def activate_user(uid):
     c = conn()
     cur = c.cursor()
-    cur.execute("""
-        UPDATE users
-        SET is_paid=1, paid_at=%s, chat_state='PAID'
-        WHERE id=%s
-    """, (datetime.utcnow(), uid))
+    cur.execute("UPDATE users SET is_paid=1, paid_at=%s, chat_state='PAID' WHERE id=%s",
+                (datetime.utcnow(), uid))
     c.commit()
     cur.close()
     c.close()
@@ -220,62 +204,20 @@ def update_profile(uid, field, value):
     c.close()
 
 # -------------------------------------------------
-# EMBEDDINGS
+# DISTANCE
 # -------------------------------------------------
-def build_profile_text(p):
-    return (
-        f"{p.get('age','')} year old {p.get('gender','')} in {p.get('location','')}.\n"
-        f"Looking for {p.get('intent','')}.\n"
-        f"Hobbies: {p.get('hobbies','')}.\n"
-        f"Personality: {p.get('personality_traits','')}.\n"
-        f"Bio: {p.get('bio','')}."
-    )
-
-def update_embedding(uid):
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (uid,))
-    p = cur.fetchone()
-    if not p:
-        cur.close()
-        c.close()
-        return
-
-    text = build_profile_text(p)
-    emb = client.embeddings.create(
-        model="text-embedding-3-large",
-        input=text
-    ).data[0].embedding
-
-    cur.execute(
-        "UPDATE profiles SET embedding=%s WHERE user_id=%s",
-        (json.dumps(emb), uid)
-    )
-    c.commit()
-    cur.close()
-    c.close()
+def compute_distance(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2):
+        return None
+    R = 6371
+    dlat = radians(lat2 - lat1)
+    dlon = radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
+    c = 2*asin(sqrt(a))
+    return R*c
 
 # -------------------------------------------------
-# MATCHING (AI)
-# -------------------------------------------------
-def cosine_similarity(v1, v2):
-    dot = sum(a*b for a,b in zip(v1,v2))
-    n1 = sum(a*a for a in v1) ** 0.5
-    n2 = sum(b*b for b in v2) ** 0.5
-    return dot / (n1*n2) if n1 and n2 else 0
-
-def haversine(lat1, lon1, lat2, lon2):
-    if None in [lat1, lon1, lat2, lon2]:
-        return 999
-    lon1, lat1, lon2, lat2 = map(radians,[lon1,lat1,lon2,lat2])
-    dlon = lon2-lon1
-    dlat = lat2-lat1
-    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
-    return 6371 * 2 * asin(sqrt(a))
-
-
-# -------------------------------------------------
-# RESET PROFILE (REQUIRED BY app.py)
+# RESET PROFILE
 # -------------------------------------------------
 def reset_profile(uid):
     c = conn()
@@ -295,7 +237,6 @@ def reset_profile(uid):
             bio = NULL,
             hobbies = NULL,
             personality_traits = NULL,
-            embedding = NULL,
             latitude = NULL,
             longitude = NULL
         WHERE user_id = %s
@@ -304,36 +245,25 @@ def reset_profile(uid):
     cur.close()
     c.close()
 
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
-
-# Haversine formula to compute distance in km
-def compute_distance(lat1, lon1, lat2, lon2):
-    if None in (lat1, lon1, lat2, lon2):
-        return None
-    R = 6371  # Earth radius in km
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
-    c = 2*asin(sqrt(a))
-    return R*c
-
+# -------------------------------------------------
+# MATCHING (AI-BASED WITHOUT EMBEDDINGS)
+# -------------------------------------------------
 def get_matches(user_id):
-    c = conn()  # use your existing connection function
+    c = conn()
     cur = c.cursor(dictionary=True)
 
-    # get current user profile
     cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
     user = cur.fetchone()
     if not user:
         return []
 
-    # fetch all other users (exclude self)
+    # fetch all other candidates
     cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
     candidates = cur.fetchall()
     if not candidates:
         return []
 
-    # compute distances
+    # compute distance for each
     for cand in candidates:
         cand['distance_km'] = compute_distance(
             user.get('latitude'),
@@ -342,21 +272,25 @@ def get_matches(user_id):
             cand.get('longitude')
         )
 
-    # prepare candidate description for AI
+    # prepare candidate descriptions outside f-string
     candidate_texts = []
     for cand in candidates:
-        text = f"ID: {cand['user_id']}, Age: {cand['age']}, Gender: {cand['gender']}, Preferred Gender: {cand.get('preferred_gender','')}, City: {cand.get('city','')}, Distance: {cand.get('distance_km','Unknown')}, Bio: {cand.get('bio','')}, Hobbies: {cand.get('hobbies','')}, Personality: {cand.get('personality_traits','')}"
-        candidate_texts.append(text)
+        candidate_texts.append(
+            f"ID: {cand['user_id']}, Age: {cand['age']}, Gender: {cand['gender']}, Preferred Gender: {cand.get('preferred_gender','')}, Distance: {cand.get('distance_km','Unknown')}, Bio: {cand.get('bio','')}, Hobbies: {cand.get('hobbies','')}, Personality: {cand.get('personality_traits','')}"
+        )
+
+    # join outside f-string to avoid backslash inside {}
+    candidates_joined = "\n".join(candidate_texts)
 
     prompt = f"""
-    You are an AI matchmaking assistant. Current user is a {user['age']} year old {user['gender']} who prefers {user.get('preferred_gender','')}.
+You are an AI matchmaking assistant. Current user is a {user['age']} year old {user['gender']} who prefers {user.get('preferred_gender','')}.
 
-    Here are the candidate profiles:
-    {'\n'.join(candidate_texts)}
+Here are the candidate profiles:
+{candidates_joined}
 
-    Choose and rank the top 3 matches purely based on compatibility, age preference, preferred gender, and proximity.  
-    Return only a Python list of user IDs, e.g., [3, 7, 15].
-    """
+Choose and rank the top 3 matches purely based on compatibility, age preference, preferred gender, and proximity.  
+Return only a Python list of user IDs, e.g., [3, 7, 15].
+"""
 
     try:
         response = client.chat.completions.create(
@@ -366,7 +300,7 @@ def get_matches(user_id):
         )
         top_ids = eval(response.choices[0].message['content'])
     except Exception:
-        top_ids = [cand['user_id'] for cand in candidates[:3]]  # fallback
+        top_ids = [cand['user_id'] for cand in candidates[:3]]
 
     # fetch full profiles of top matches
     if top_ids:
@@ -379,5 +313,3 @@ def get_matches(user_id):
     cur.close()
     c.close()
     return top_matches
-
-
