@@ -141,12 +141,23 @@ async def webhook(request: Request):
         return JSONResponse({"status": "ignored"})
 
     phone = payload["senderData"]["chatId"].split("@")[0]
-    text = payload["messageData"]["textMessageData"]["textMessage"].strip()
+
+    # Safely extract text message
+    text = ""
+    msg_data = payload.get("messageData", {})
+    text_data = msg_data.get("textMessageData")
+    if text_data:
+        text = text_data.get("textMessage", "").strip()
+
+    if not text:
+        # Ignore non-text messages
+        return JSONResponse({"status": "ignored"})
 
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
 
     return JSONResponse({"status": "processed"})
+
 
 # -------------------------------------------------
 # CHAT CONSTANTS
