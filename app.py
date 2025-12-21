@@ -339,9 +339,20 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "temp_contact_phone", num)
         res = create_paynow_payment(uid, num)
         if not res:
-            db_manager.set_state(uid, "NEW")
-            return "❌ Payment initiation failed."
-        db_manager.set_state(uid, "PAYMENT_PENDING")
+    # 1. Clear the faulty data
+            db_manager.update_profile(uid, "temp_contact_phone", None)
+    
+    # 2. Reset back to the payment menu so they can choose a different method
+            db_manager.set_state(uid, "NEW") 
+
+            return (
+                "❌ We couldn't start the EcoCash transaction.\n\n"
+                "Possible reasons:\n"
+                "• Insufficient funds\n"
+                "• Paynow is currently down\n"
+                "• Network issues\n\n"
+                "Type 'Hello' to try again."
+            )
         return res + "\n\n⏳ Waiting for confirmation..."
 
     if state == "PAYMENT_PENDING":

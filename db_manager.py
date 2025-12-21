@@ -313,19 +313,29 @@ def get_user_phone(uid):
     return row[0] if row else None
 
 def opposite_gender(g):
-    if g.lower() == "male":
+    if not g:
+        return None
+    g = g.lower()
+    if g == "male":
         return "female"
-    elif g.lower() == "female":
+    if g == "female":
         return "male"
     return None
 
 
+
 def gender_match(user, cand):
-    user_pref = user.get("preferred_gender") or opposite_gender(user.get("gender"))
-    cand_pref = cand.get("preferred_gender") or opposite_gender(cand.get("gender"))
-    if not user_pref or not cand_pref:
+    user_gender = user.get("gender")
+    cand_gender = cand.get("gender")
+
+    if not user_gender or not cand_gender:
         return False
-    return cand["gender"].lower() == user_pref.lower() and cand_pref.lower() == user["gender"].lower()
+
+    # heterosexual only
+    if user_gender == cand_gender:
+        return False
+
+    return True
 
 
 def age_match(user, cand):
