@@ -298,7 +298,7 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "temp_contact_phone", msg)
         db_manager.update_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
-        db_manager.set_state(uid, "AWAITING_ECOCASH")
+        
 
         if not matches:
             db_manager.set_state(uid, "NEW")
@@ -308,8 +308,8 @@ def handle_message(phone: str, text: str) -> str:
                 "🔄 Conversation ended.\n"
                 "Type *HELLO* anytime to start again."
             )
-
-
+        
+        db_manager.set_state(uid, "AWAITING_ECOCASH")
         reply = "🔥 *Top Matches for You* 🔥\n\n"
         for m in matches:
             reply += f"• {m['name']} ({m['age']}) — {m['location']}\n"
