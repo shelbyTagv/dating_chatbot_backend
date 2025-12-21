@@ -289,7 +289,6 @@ def get_matches(user_id):
     c.close()
 
     matches = []
-
     for cand in candidates:
         if not gender_match(user, cand):
             continue
@@ -299,7 +298,6 @@ def get_matches(user_id):
             continue
         matches.append(cand)
 
-    # Randomly pick top 2 matches
     if matches:
         matches = random.sample(matches, min(2, len(matches)))
 
@@ -315,24 +313,33 @@ def get_user_phone(uid):
     return row[0] if row else None
 
 def opposite_gender(g):
-    return "female" if g == "male" else "male"
+    if g.lower() == "male":
+        return "female"
+    elif g.lower() == "female":
+        return "male"
+    return None
 
 
 def gender_match(user, cand):
-    user_pref = user.get("preferred_gender") or opposite_gender(user["gender"])
-    cand_pref = cand.get("preferred_gender") or opposite_gender(cand["gender"])
-    return cand["gender"] == user_pref and cand_pref == user["gender"]
+    user_pref = user.get("preferred_gender") or opposite_gender(user.get("gender"))
+    cand_pref = cand.get("preferred_gender") or opposite_gender(cand.get("gender"))
+    if not user_pref or not cand_pref:
+        return False
+    return cand["gender"].lower() == user_pref.lower() and cand_pref.lower() == user["gender"].lower()
 
 
 def age_match(user, cand):
-    return (
-        user["age_min"] <= cand["age"] <= user["age_max"] and
-        cand["age_min"] <= user["age"] <= cand["age_max"]
-    )
+    try:
+        return (
+            user["age_min"] <= cand["age"] <= user["age_max"] and
+            cand["age_min"] <= user["age"] <= cand["age_max"]
+        )
+    except TypeError:
+        return False  # handle missing/None values
 
 def intent_match(user, cand):
-    compatible = INTENT_COMPATIBILITY.get(user["intent"], [])
-    return cand["intent"] in compatible
+    compatible = INTENT_COMPATIBILITY.get(user.get("intent"), [])
+    return cand.get("intent") in compatible
 
 
 

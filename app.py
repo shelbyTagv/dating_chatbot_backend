@@ -63,10 +63,6 @@ VALID_PREFIXES = ["071","072","073","074","075","076","077","078","079"]
 def validate_ecocash_number(num: str) -> bool:
     return num.isdigit() and len(num) == 10 and num[:3] in VALID_PREFIXES
 
-def generate_paynow_hash(values: dict) -> str:
-    s = "".join(str(values[k]) for k in sorted(values.keys()))
-    s += PAYNOW_KEY
-    return hashlib.sha512(s.encode()).hexdigest().upper()
 
 def create_paynow_payment(uid: int, phone: str):
     transaction_id = f"TX-{uuid.uuid4().hex[:10]}"
@@ -103,39 +99,6 @@ def create_paynow_payment(uid: int, phone: str):
 
     except Exception as e:
         print("PesePay exception:", e)
-        return None
-
-
-def create_paynow_payment(uid: int, phone: str):
-    ref = f"ORDER-{uuid.uuid4().hex[:10]}"
-    payload = {
-        "id": PAYNOW_ID,
-        "reference": ref,
-        "amount": "2.00",
-        "additionalinfo": "Dating Match Unlock",
-        "returnurl": "https://example.com/return",
-        "resulturl": "https://example.com/result",
-        "authemail": "payments@example.com",
-        "phone": phone,
-        "method": "ecocash"
-    }
-    payload["hash"] = generate_paynow_hash(payload)
-
-    try:
-        r = requests.post(PAYNOW_URL, data=payload, timeout=20)
-        poll_url = None
-        for line in r.text.splitlines():
-            if line.lower().startswith("pollurl="):
-                poll_url = line.split("=", 1)[1]
-
-        if not poll_url:
-            print("Invalid Paynow response:", r.text)
-            return None
-
-        db_manager.create_payment(uid, ref, poll_url)
-        return "📲 Check your phone and approve the EcoCash payment."
-    except Exception as e:
-        print("Paynow error:", e)
         return None
 
 
@@ -340,6 +303,7 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "temp_contact_phone", msg)
         db_manager.update_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
+        db_manager.set_state(uid, "AWAITING_ECOCASH")
         
 
         if not matches:
@@ -351,7 +315,7 @@ def handle_message(phone: str, text: str) -> str:
                 "Type *HELLO* anytime to start again."
             )
         
-        db_manager.set_state(uid, "AWAITING_ECOCASH")
+        
         reply = "🔥 *Top Matches for You* 🔥\n\n"
         for m in matches:
             reply += f"• {m['name']} ({m['age']}) — {m['location']}\n"
