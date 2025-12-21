@@ -2,14 +2,22 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import random
+import json
 import mysql.connector.pooling
+from datetime import datetime
+from math import radians, cos, sin, asin, sqrt
+from openai import OpenAI
 
+# -------------------------------------------------
+# OPENAI
+# -------------------------------------------------
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
+
+# -------------------------------------------------
+# DB CONNECTION POOL
+# -------------------------------------------------
 _pool = None
 
-# -------------------------------------------------
-# CONNECTION POOL
-# -------------------------------------------------
 def conn():
     global _pool
     if not _pool:
@@ -25,13 +33,26 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# INIT DB (CREATE IF NOT EXISTS)
+# COLUMN CHECK HELPER
+# -------------------------------------------------
+def column_exists(cursor, table, column):
+    cursor.execute("""
+        SELECT COUNT(*)
+        FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE()
+          AND TABLE_NAME = %s
+          AND COLUMN_NAME = %s
+    """, (table, column))
+    return cursor.fetchone()[0] > 0
+
+# -------------------------------------------------
+# INIT + AUTO-MIGRATION
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
 
-    # Create USERS
+    # ---------------- USERS ----------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -41,7 +62,10 @@ def init_db():
         )
     """)
 
-    # Create PROFILES
+    if not column_exists(cur, "users", "paid_at"):
+        cur.execute("ALTER TABLE users ADD paid_at DATETIME")
+
+    # ---------------- PROFILES ----------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS profiles (
             user_id INT PRIMARY KEY,
@@ -58,7 +82,21 @@ def init_db():
         )
     """)
 
-    # Create PAYMENTS
+    profile_columns = {
+        "bio": "TEXT",
+        "hobbies": "TEXT",
+        "personality_traits": "TEXT",
+        "embedding": "JSON",
+        "latitude": "DECIMAL(9,6)",
+        "longitude": "DECIMAL(9,6)",
+        "temp_contact_phone": "VARCHAR(20)"
+    }
+
+    for col, col_type in profile_columns.items():
+        if not column_exists(cur, "profiles", col):
+            cur.execute(f"ALTER TABLE profiles ADD {col} {col_type}")
+
+    # ---------------- PAYMENTS ----------------
     cur.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -71,29 +109,29 @@ def init_db():
         )
     """)
 
+    if not column_exists(cur, "payments", "paid_at"):
+        cur.execute("ALTER TABLE payments ADD paid_at DATETIME")
+
     c.commit()
     cur.close()
     c.close()
 
 # -------------------------------------------------
-# USER FUNCTIONS
+# USER
 # -------------------------------------------------
 def get_user_by_phone(phone):
     c = conn()
     cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
-    user = cur.fetchone()
+    u = cur.fetchone()
     cur.close()
     c.close()
-    return user
+    return u
 
 def create_new_user(phone):
     c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute(
-        "INSERT INTO users (phone, chat_state) VALUES (%s, %s)",
-        (phone, "NEW")
-    )
+    cur = c.cursor()
+    cur.execute("INSERT INTO users (phone) VALUES (%s)", (phone,))
     c.commit()
     cur.close()
     c.close()
@@ -107,11 +145,20 @@ def set_state(uid, state):
     cur.close()
     c.close()
 
-def reset_chat_state(uid):
-    set_state(uid, "NEW")
+def activate_user(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        UPDATE users
+        SET is_paid=1, paid_at=%s, chat_state='PAID'
+        WHERE id=%s
+    """, (datetime.utcnow(), uid))
+    c.commit()
+    cur.close()
+    c.close()
 
 # -------------------------------------------------
-# PROFILE FUNCTIONS
+# PROFILE
 # -------------------------------------------------
 def ensure_profile(uid):
     c = conn()
@@ -123,101 +170,64 @@ def ensure_profile(uid):
     cur.close()
     c.close()
 
-def reset_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        UPDATE profiles SET
-            gender=NULL,
-            name=NULL,
-            age=NULL,
-            location=NULL,
-            intent=NULL,
-            preferred_gender=NULL,
-            age_min=NULL,
-            age_max=NULL,
-            contact_phone=NULL
-        WHERE user_id=%s
-    """, (uid,))
-    c.commit()
-    cur.close()
-    c.close()
-
 def update_profile(uid, field, value):
     c = conn()
     cur = c.cursor()
-    query = f"UPDATE profiles SET {field}=%s WHERE user_id=%s"
-    cur.execute(query, (value, uid))
+    cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, uid))
     c.commit()
     cur.close()
     c.close()
 
-def set_gender(uid, gender):
-    update_profile(uid, "gender", gender)
+# -------------------------------------------------
+# EMBEDDINGS
+# -------------------------------------------------
+def build_profile_text(p):
+    return (
+        f"{p.get('age','')} year old {p.get('gender','')} in {p.get('location','')}.\n"
+        f"Looking for {p.get('intent','')}.\n"
+        f"Hobbies: {p.get('hobbies','')}.\n"
+        f"Personality: {p.get('personality_traits','')}.\n"
+        f"Bio: {p.get('bio','')}."
+    )
 
-# -------------------------------------------------
-# PAYMENT FUNCTIONS
-# -------------------------------------------------
-def create_payment(uid, reference, poll_url):
+def update_embedding(uid):
     c = conn()
-    cur = c.cursor()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (uid,))
+    p = cur.fetchone()
+    if not p:
+        cur.close()
+        c.close()
+        return
+
+    text = build_profile_text(p)
+    emb = client.embeddings.create(
+        model="text-embedding-3-large",
+        input=text
+    ).data[0].embedding
+
     cur.execute(
-        "INSERT INTO payments (user_id, reference, poll_url) VALUES (%s, %s, %s)",
-        (uid, reference, poll_url)
+        "UPDATE profiles SET embedding=%s WHERE user_id=%s",
+        (json.dumps(emb), uid)
     )
     c.commit()
     cur.close()
     c.close()
 
-def get_pending_payments():
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM payments WHERE paid=0")
-    rows = cur.fetchall()
-    cur.close()
-    c.close()
-    return rows
-
-def mark_payment_paid(payment_id):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE payments SET paid=1 WHERE id=%s", (payment_id,))
-    c.commit()
-    cur.close()
-    c.close()
-
-def activate_user(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE users SET is_paid=1, chat_state=NULL WHERE id=%s", (uid,))
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_user_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
-    phone = cur.fetchone()[0]
-    cur.close()
-    c.close()
-    return phone
-
 # -------------------------------------------------
-# MATCHES
+# MATCHING (AI)
 # -------------------------------------------------
-def get_matches(uid, limit=2):
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("""
-        SELECT p.name, p.age, p.location, u.phone AS contact_phone
-        FROM profiles p
-        JOIN users u ON u.id = p.user_id
-        WHERE p.user_id != %s
-          AND p.contact_phone IS NOT NULL
-    """, (uid,))
-    rows = cur.fetchall()
-    random.shuffle(rows)
-    cur.close()
-    c.close()
-    return rows[:limit]
+def cosine_similarity(v1, v2):
+    dot = sum(a*b for a,b in zip(v1,v2))
+    n1 = sum(a*a for a in v1) ** 0.5
+    n2 = sum(b*b for b in v2) ** 0.5
+    return dot / (n1*n2) if n1 and n2 else 0
+
+def haversine(lat1, lon1, lat2, lon2):
+    if None in [lat1, lon1, lat2, lon2]:
+        return 999
+    lon1, lat1, lon2, lat2 = map(radians,[lon1,lat1,lon2,lat2])
+    dlon = lon2-lon1
+    dlat = lat2-lat1
+    a = sin(dlat/2)**2 + cos(lat1)*cos(lat2)*sin(dlon/2)**2
+    return 6371 * 2 * asin(sqrt(a))

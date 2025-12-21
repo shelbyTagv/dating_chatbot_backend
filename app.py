@@ -2,86 +2,104 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import requests
-from fastapi import FastAPI, Request, HTTPException
-from fastapi.responses import JSONResponse, PlainTextResponse
-import db_manager
-
 import uuid
+import time
 import threading
 import hashlib
-import time
+import requests
 
+from fastapi import FastAPI, Request, HTTPException
+from fastapi.responses import JSONResponse
+
+import db_manager
+
+# -------------------------------------------------
+# APP
+# -------------------------------------------------
 app = FastAPI()
 
+# -------------------------------------------------
+# ENV
+# -------------------------------------------------
 GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
 GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
-VERIFY_TOKEN = os.getenv("WHATSAPP_VERIFY_TOKEN")
 
 PAYNOW_ID = os.getenv("PAYNOW_ID")
 PAYNOW_KEY = os.getenv("PAYNOW_KEY")
 PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
-RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
-RESULT_URL = os.getenv("PAYNOW_RESULT_URL")
 
 # -------------------------------------------------
 # STARTUP
 # -------------------------------------------------
 @app.on_event("startup")
 def startup():
-    db_manager.init_db()  # ensure tables exist
-    start_payment_polling()
+    db_manager.init_db()
+    threading.Thread(target=poll_payments, daemon=True).start()
 
-# -----------------------------
-# PAYMENT UTILS
-# -----------------------------
+# -------------------------------------------------
+# WHATSAPP (GREEN API ONLY)
+# -------------------------------------------------
+def send_whatsapp_message(phone: str, text: str):
+    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
+    payload = {
+        "chatId": f"{phone}@c.us",
+        "message": text
+    }
+    try:
+        requests.post(url, json=payload, timeout=10)
+    except Exception as e:
+        print("WhatsApp send error:", e)
+
+# -------------------------------------------------
+# PAYNOW UTILS
+# -------------------------------------------------
 VALID_PREFIXES = ["071","072","073","074","075","076","077","078","079"]
 
-def validate_ecocash_number(number: str) -> bool:
-    number = number.strip()
-    return number.isdigit() and len(number) == 10 and number[:3] in VALID_PREFIXES
+def validate_ecocash_number(num: str) -> bool:
+    return num.isdigit() and len(num) == 10 and num[:3] in VALID_PREFIXES
 
 def generate_paynow_hash(values: dict) -> str:
     s = "".join(str(values[k]) for k in sorted(values.keys()))
     s += PAYNOW_KEY
     return hashlib.sha512(s.encode()).hexdigest().upper()
 
-def create_paynow_payment(uid, ecocash_phone):
+def create_paynow_payment(uid: int, phone: str):
     ref = f"ORDER-{uuid.uuid4().hex[:10]}"
     payload = {
         "id": PAYNOW_ID,
         "reference": ref,
         "amount": "2.00",
         "additionalinfo": "Dating Match Unlock",
-        "returnurl": RETURN_URL,
-        "resulturl": RESULT_URL,
+        "returnurl": "https://example.com/return",
+        "resulturl": "https://example.com/result",
         "authemail": "payments@example.com",
-        "phone": ecocash_phone,
+        "phone": phone,
         "method": "ecocash"
     }
     payload["hash"] = generate_paynow_hash(payload)
+
     try:
         r = requests.post(PAYNOW_URL, data=payload, timeout=20)
         poll_url = None
-        pay_url = None
         for line in r.text.splitlines():
             if line.lower().startswith("pollurl="):
                 poll_url = line.split("=", 1)[1]
-            if line.lower().startswith("browserurl="):
-                pay_url = line.split("=", 1)[1]
 
-        if not poll_url or not pay_url:
+        if not poll_url:
             print("Invalid Paynow response:", r.text)
             return None
 
         db_manager.create_payment(uid, ref, poll_url)
-        return pay_url
+        return "📲 Check your phone and approve the EcoCash payment."
     except Exception as e:
-        print("Paynow request failed:", e)
+        print("Paynow error:", e)
         return None
 
+# -------------------------------------------------
+# PAYMENT POLLING
+# -------------------------------------------------
 def poll_payments():
     while True:
         try:
@@ -92,54 +110,25 @@ def poll_payments():
                     if "paid" in r.text.lower():
                         db_manager.mark_payment_paid(p["id"])
                         db_manager.activate_user(p["user_id"])
+
                         phone = db_manager.get_user_phone(p["user_id"])
                         matches = db_manager.get_matches(p["user_id"])
+
                         msg = "✅ *Payment Confirmed!*\n\n📞 Contact details:\n\n"
                         for m in matches:
-                            msg += f"{m['name']} — {m['contact_phone']}\n"
+                            msg += f"{m['name']} — {m['phone']}\n"
+
                         send_whatsapp_message(phone, msg)
-                except Exception as e_inner:
-                    print(f"Error polling payment {p['id']}: {e_inner}")
-        except Exception as e_outer:
-            print("Payment polling error:", e_outer)
+                except Exception as e:
+                    print("Polling error:", e)
+        except Exception as outer:
+            print("Polling loop error:", outer)
+
         time.sleep(20)
 
-def start_payment_polling():
-    threading.Thread(target=poll_payments, daemon=True).start()
-
-# -----------------------------
-# WHATSAPP SEND
-# -----------------------------
-def send_whatsapp_message(phone, text):
-    url = f"https://graph.facebook.com/v19.0/{os.getenv('WHATSAPP_PHONE_NUMBER_ID')}/messages"
-    headers = {
-        "Authorization": f"Bearer {os.getenv('WHATSAPP_ACCESS_TOKEN')}",
-        "Content-Type": "application/json"
-    }
-    payload = {
-        "messaging_product": "whatsapp",
-        "to": phone,
-        "type": "text",
-        "text": {"body": text}
-    }
-    requests.post(url, json=payload, headers=headers, timeout=15)
-
-
-# -----------------------------
-# WEBHOOK
-# -----------------------------
-@app.get("/webhook")
-async def verify_webhook(request: Request):
-    hub_mode = request.query_params.get("hub.mode")
-    hub_challenge = request.query_params.get("hub.challenge")
-    hub_verify_token = request.query_params.get("hub.verify_token")
-
-    if hub_mode == "subscribe" and hub_verify_token == VERIFY_TOKEN:
-        return PlainTextResponse(hub_challenge)
-    return PlainTextResponse("Verification failed", status_code=403)
-
-
-
+# -------------------------------------------------
+# WEBHOOK (GREEN API)
+# -------------------------------------------------
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
@@ -147,29 +136,21 @@ async def webhook(request: Request):
         raise HTTPException(status_code=401)
 
     payload = await request.json()
+
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
-    sender = payload.get("senderData", {})
-    phone = sender.get("chatId", "").split("@")[0]
-
-    msg = payload.get("messageData", {})
-    text = (
-        msg.get("textMessageData", {}).get("textMessage")
-        or msg.get("extendedTextMessageData", {}).get("text")
-        or ""
-    ).strip()
-
-    if not phone or not text:
-        return JSONResponse({"status": "empty"})
+    phone = payload["senderData"]["chatId"].split("@")[0]
+    text = payload["messageData"]["textMessageData"]["textMessage"].strip()
 
     reply = handle_message(phone, text)
     send_whatsapp_message(phone, reply)
+
     return JSONResponse({"status": "processed"})
 
-# -----------------------------
+# -------------------------------------------------
 # CHAT CONSTANTS
-# -----------------------------
+# -------------------------------------------------
 INTENT_MAP = {
     "1": "sugar mummy",
     "2": "sugar daddy",
@@ -197,135 +178,101 @@ def infer_gender(intent):
         return "male"
     return "any"
 
-# -----------------------------
-# CHAT HANDLER
-# -----------------------------
-def handle_message(phone, text):
+# -------------------------------------------------
+# CHAT HANDLER (UNCHANGED UX)
+# -------------------------------------------------
+def handle_message(phone: str, text: str) -> str:
     msg = text.strip()
     msg_l = msg.lower()
 
-    # ------------------------------
-    # USER / PROFILE
-    # ------------------------------
     user = db_manager.get_user_by_phone(phone)
     if not user:
         user = db_manager.create_new_user(phone)
-    if not user["chat_state"]:
-        db_manager.set_state(user["id"], "NEW")
-        user["chat_state"] = "NEW"
 
     uid = user["id"]
-    state = user["chat_state"]
+    state = user["chat_state"] or "NEW"
+
     db_manager.ensure_profile(uid)
 
-    print(f"PHONE: {phone}, STATE: {state}, MSG: {msg}")
-
-    # ------------------------------
-    # EXIT
-    # ------------------------------
     if msg_l == "exit":
         db_manager.set_state(uid, "NEW")
         return "❌ Conversation ended.\n\nType *HELLO* to start again."
 
-    # ------------------------------
-    # FLOW HANDLER
-    # ------------------------------
     if state == "NEW":
         db_manager.reset_profile(uid)
         db_manager.set_state(uid, "GET_GENDER")
-        state = "GET_GENDER"
         return (
             "👋 Welcome!\n\n"
             "Please tell us your gender:\n"
-            "• MALE\n"
-            "• FEMALE\n"
-            "• OTHER"
+            "• MALE\n• FEMALE\n• OTHER"
         )
 
     if state == "GET_GENDER":
         if msg_l not in ["male", "female", "other"]:
-            return "❗ Please reply with *MALE*, *FEMALE*, or *OTHER*."
-        db_manager.set_gender(uid, msg_l)
+            return "❗ Reply with *MALE*, *FEMALE* or *OTHER*."
+        db_manager.update_profile(uid, "gender", msg_l)
         db_manager.set_state(uid, "WELCOME")
-        state = "WELCOME"
         return "✅ Saved!\n\nType *HELLO* to continue."
 
     if state == "WELCOME":
         if msg_l != "hello":
-            return "👉 Please type *HELLO* to proceed."
+            return "👉 Type *HELLO* to proceed."
         db_manager.set_state(uid, "GET_INTENT")
-        state = "GET_INTENT"
         return (
             "💖 What are you looking for?\n\n"
-            "1️⃣ Sugar mummy\n"
-            "2️⃣ Sugar daddy\n"
-            "3️⃣ Benten\n"
-            "4️⃣ Girlfriend\n"
-            "5️⃣ Boyfriend\n"
-            "6️⃣ 1 night stand\n"
-            "7️⃣ Just vibes\n"
-            "8️⃣ Friend"
+            "1️⃣ Sugar mummy\n2️⃣ Sugar daddy\n3️⃣ Benten\n"
+            "4️⃣ Girlfriend\n5️⃣ Boyfriend\n6️⃣ 1 night stand\n"
+            "7️⃣ Just vibes\n8️⃣ Friend"
         )
 
     if state == "GET_INTENT":
         intent = INTENT_MAP.get(msg)
         if not intent:
-            return "❗ Please choose a number between *1 – 8*."
+            return "❗ Choose a number (1–8)."
         db_manager.update_profile(uid, "intent", intent)
         db_manager.update_profile(uid, "preferred_gender", infer_gender(intent))
         db_manager.set_state(uid, "GET_AGE_RANGE")
-        state = "GET_AGE_RANGE"
         return (
             "🎂 Preferred age range:\n\n"
-            "1️⃣ 18–25\n"
-            "2️⃣ 26–30\n"
-            "3️⃣ 31–35\n"
-            "4️⃣ 36–40\n"
-            "5️⃣ 41–50\n"
-            "6️⃣ 50+"
+            "1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n"
+            "4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
         )
 
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r:
-            return "❗ Please select a valid option *(1 – 6)*."
+            return "❗ Choose a valid option."
         db_manager.update_profile(uid, "age_min", r[0])
         db_manager.update_profile(uid, "age_max", r[1])
         db_manager.set_state(uid, "GET_NAME")
-        state = "GET_NAME"
-        return "📝 What is your *name*?"
+        return "📝 What is your name?"
 
     if state == "GET_NAME":
         db_manager.update_profile(uid, "name", msg)
         db_manager.set_state(uid, "GET_AGE")
-        state = "GET_AGE"
         return "🎂 How old are you?"
 
     if state == "GET_AGE":
         if not msg.isdigit():
-            return "❗ Please enter a valid age."
+            return "❗ Enter a valid age."
         db_manager.update_profile(uid, "age", int(msg))
         db_manager.set_state(uid, "GET_LOCATION")
-        state = "GET_LOCATION"
         return "📍 Where are you located?"
 
     if state == "GET_LOCATION":
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
-        state = "GET_PHONE"
         return "📞 Enter your contact number:"
 
     if state == "GET_PHONE":
-        db_manager.update_profile(uid, "contact_phone", msg)
+        db_manager.update_profile(uid, "temp_contact_phone", msg)
         matches = db_manager.get_matches(uid)
         db_manager.set_state(uid, "PAY")
-        state = "PAY"
 
         if not matches:
             return (
-                "✅ Profile saved successfully!\n\n"
-                "🚫 No matches found yet.\n"
-                "We will notify you when new matches appear."
+                "✅ Profile saved!\n\n"
+                "🚫 No matches found yet."
             )
 
         reply = "🔥 *Top Matches for You* 🔥\n\n"
@@ -336,33 +283,20 @@ def handle_message(phone, text):
 
     if state == "PAY":
         db_manager.set_state(uid, "AWAITING_ECOCASH")
-        state = "AWAITING_ECOCASH"
-        return "💰 Please enter your EcoCash number (e.g., 0779319913) to pay $2."
+        return "💰 Enter your EcoCash number (e.g. 0779319913):"
 
     if state == "AWAITING_ECOCASH":
-        if msg.startswith("+263"):
-            msg = "0" + msg[4:]
-        elif msg.startswith("263"):
-            msg = "0" + msg[3:]
-
-        if not validate_ecocash_number(msg):
-            return "❌ Invalid EcoCash number. Enter like 0779319913."
-
-        db_manager.update_profile(uid, "contact_phone", msg)
-        link = create_paynow_payment(uid, msg)
-        if not link:
-            return "❌ Payment initiation failed. Try again later."
-
+        num = msg.replace("+263", "0").replace("263", "0")
+        if not validate_ecocash_number(num):
+            return "❌ Invalid EcoCash number."
+        db_manager.update_profile(uid, "temp_contact_phone", num)
+        res = create_paynow_payment(uid, num)
+        if not res:
+            return "❌ Payment initiation failed."
         db_manager.set_state(uid, "PAYMENT_PENDING")
-        state = "PAYMENT_PENDING"
-        return (
-            "💳 EcoCash payment initiated.\n\n"
-            "📲 Check your phone and enter your EcoCash PIN.\n\n"
-            f"{link}\n\n"
-            "⏳ Waiting for confirmation..."
-        )
+        return res + "\n\n⏳ Waiting for confirmation..."
 
     if state == "PAYMENT_PENDING":
         return "⏳ Waiting for EcoCash payment confirmation..."
 
-    return "❗ Sorry, I didn't understand. Please follow the instructions above."
+    return "❗ Please follow the instructions above."
