@@ -78,6 +78,10 @@ def create_paynow_payment(uid: int, phone: str):
     return_url = os.getenv("PAYNOW_RETURN_URL")  # User sees this after payment
     result_url = os.getenv("PAYNOW_RESULT_URL")  # Server-to-server webhook
 
+    if not integration_key or not encryption_key:
+        print("❌ ERROR: PesePay keys are missing in Environment Variables!")
+        return None
+
     payload = {
         "amount": 2.00,
         "currencyCode": "USD",
