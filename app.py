@@ -27,11 +27,12 @@ ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
 GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 
-PAYNOW_ID = os.getenv("PAYNOW_ID")
-PAYNOW_KEY = os.getenv("PAYNOW_KEY")
-PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
+#PAYNOW_ID = os.getenv("PAYNOW_ID")
+#PAYNOW_KEY = os.getenv("PAYNOW_KEY")
+#PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
 
-PESEPAY_API_URL = "https://api.pesepay.com/api/payments-engine/v1/payments"
+# Example for sandbox testing
+PESEPAY_API_URL = "https://sandbox-api.pesepay.com/api/payments-engine/v1/payments"
 PESEPAY_INTEGRATION_KEY = os.getenv("PESEPAY_INTEGRATION_KEY")
 
 RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
