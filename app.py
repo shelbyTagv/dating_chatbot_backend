@@ -145,12 +145,15 @@ async def webhook(request: Request):
     # Safely extract text message
     text = ""
     msg_data = payload.get("messageData", {})
-    text_data = msg_data.get("textMessageData")
-    if text_data:
-        text = text_data.get("textMessage", "").strip()
+
+    if "textMessageData" in msg_data:
+        text = msg_data["textMessageData"].get("textMessage", "")
+
+    elif "extendedTextMessageData" in msg_data:
+        text = msg_data["extendedTextMessageData"].get("text", "")
+    text = text.strip()
 
     if not text:
-        # Ignore non-text messages
         return JSONResponse({"status": "ignored"})
 
     reply = handle_message(phone, text)
@@ -210,10 +213,11 @@ def handle_message(phone: str, text: str) -> str:
         return "❌ Conversation ended.\n\nType *HELLO* to start again."
 
     if state == "NEW":
+        db_manager.ensure_profile(uid)
         db_manager.reset_profile(uid)
         db_manager.set_state(uid, "GET_GENDER")
         return (
-            "👋 Welcome!\n\n"
+            "👋 Welcome to Shelby Date connections!\n\n"
             "Please tell us your gender:\n"
             "• MALE\n• FEMALE\n• OTHER"
         )

@@ -314,5 +314,15 @@ Return only a Python list of user IDs, e.g., [3, 7, 15].
     c.close()
     return top_matches
 
+def get_user_phone(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    return row[0] if row else None
+
+
 
 
