@@ -114,13 +114,13 @@ def create_paynow_payment(uid: int, phone: str):
     )
 
     signature = hmac.new(
-        encryption_key.encode("utf-8"),
+        integration_key.encode("utf-8"),
         payload_string.encode("utf-8"),
         hashlib.sha512
     ).hexdigest()
 
     headers = {
-        "Authorization": f"Bearer {integration_key}",
+        "Authorization": integration_key,
         "X-Signature": signature,
         "Content-Type": "application/json",
         "Accept": "application/json"
