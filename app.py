@@ -153,8 +153,15 @@ def handle_message(phone: str, text: str) -> str:
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
     if state == "NEW":
-        db_manager.reset_profile(uid); db_manager.set_state(uid, "GET_GENDER")
-        return "👋 Welcome to Shelby Date!\n\nPlease select your gender:\n• MALE\n• FEMALE"
+        # Check if the user is saying a valid greeting
+        if msg_l in ["hello", "hi", "hey"]:
+            # ONLY reset the profile if they explicitly start over with a greeting
+            db_manager.reset_profile(uid)
+            db_manager.set_state(uid, "GET_GENDER")
+            return "👋 Welcome to Shelby Date!\n\nPlease select your gender:\n• MALE\n• FEMALE"
+        else:
+            # If they send anything else, do NOT reset and just guide them
+            return "👋 Welcome back! Please type *HELLO* or *HI* to start finding matches."
 
     if state == "GET_GENDER":
         if msg_l not in ["male", "female"]: 
@@ -235,6 +242,26 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
         return "📞 Enter your the Contact where you can be contacted:"
+    
+
+    if state == "AWAITING_MATCHES":
+        if msg_l == "status":
+            matches = db_manager.get_matches(uid)
+            if matches:
+                db_manager.set_state(uid, "CHOOSE_CURRENCY")
+                reply = "🔥 *Matches Found!* 🔥\n"
+                for m in matches: reply += f"• {m['name']} — {m['location']}\n"
+                reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
+                return reply
+            return "⏳ Still no matches yet. We will notify you! (Or type *HELLO* to redo your profile)"
+        
+        # If they type "Hello" here, it will fall through to the global greeting check
+        if msg_l in ["hello", "hi"]:
+            db_manager.reset_profile(uid)
+            db_manager.set_state(uid, "GET_GENDER")
+            return "👋 Let's restart your profile!\n\nPlease select your gender:\n• MALE\n• FEMALE"
+
+        return "Type *STATUS* to check for matches or *HELLO* to start over."
 
     if state == "GET_PHONE":
         clean_num = msg.strip().replace(" ", "").replace("+263", "0")
@@ -244,23 +271,17 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "contact_phone", msg)
 
         matches = db_manager.get_matches(uid)
+        matches = db_manager.get_matches(uid)
         if not matches: 
-            # Change state to NO_MATCHES instead of NEW
-            db_manager.set_state(uid, "NO_MATCHES") 
-            return ("✅ Profile saved! Currently, there are no matches fitting your criteria.\n\n"
-                    "We will notify you when someone joins! Type *STATUS* later to check again.")
+            # Send them to a HOLDING state, not NEW
+            db_manager.set_state(uid, "AWAITING_MATCHES") 
+            return "✅ Profile saved! We couldn't find matches right now. Type *STATUS* later to check again."
         
-        if state == "NO_MATCHES":
-            if msg_l == "status" or msg_l == "hello":
-                matches = db_manager.get_matches(uid)
-                if matches:
-                    db_manager.set_state(uid, "CHOOSE_CURRENCY")
-                    reply = "🔥 *Good news! Matches Found!* 🔥\n"
-                    for m in matches: reply += f"• {m['name']} — {m['location']}\n"
-                    reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
-                    return reply
-                return "⏳ Still no matches yet. We are looking! Type *EXIT* to restart your profile."
-            return "Type *STATUS* to check for matches or *EXIT* to redo your profile."
+        db_manager.set_state(uid, "CHOOSE_CURRENCY")
+        reply = "🔥 *Matches Found!* 🔥\n"
+        for m in matches: reply += f"• {m['name']} — {m['location']}\n"
+        reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
+        return reply
 
     if state == "CHOOSE_CURRENCY":
         if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
@@ -316,6 +337,8 @@ def handle_message(phone: str, text: str) -> str:
         return "⏳ Waiting for PIN. Type *STATUS* to check."
 
     return "❗ Type *HELLO* to start."
+
+
 
 # -------------------------------------------------
 # WEBHOOK ENDPOINT
