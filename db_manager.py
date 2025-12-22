@@ -3,12 +3,15 @@ load_dotenv()
 
 import os
 import json
+import random
 import mysql.connector.pooling
 from datetime import datetime
 from math import radians, cos, sin, asin, sqrt
 from openai import OpenAI
 
-
+# -------------------------------------------------
+# CONSTANTS & CONFIG
+# -------------------------------------------------
 INTENT_COMPATIBILITY = {
     "girlfriend": ["boyfriend"],
     "boyfriend": ["girlfriend"],
@@ -20,11 +23,6 @@ INTENT_COMPATIBILITY = {
     "benten": ["benten"]
 }
 
-
-
-# -------------------------------------------------
-# OPENAI
-# -------------------------------------------------
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # -------------------------------------------------
@@ -47,38 +45,6 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# PAYMENTS
-# -------------------------------------------------
-def create_payment(uid, reference, poll_url):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        INSERT INTO payments (user_id, reference, poll_url)
-        VALUES (%s, %s, %s)
-    """, (uid, reference, poll_url))
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_pending_payments():
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM payments WHERE paid = 0")
-    rows = cur.fetchall()
-    cur.close()
-    c.close()
-    return rows
-
-def mark_payment_paid(payment_id):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE payments SET paid = 1, paid_at = %s WHERE id = %s",
-                (datetime.utcnow(), payment_id))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
 # COLUMN CHECK HELPER
 # -------------------------------------------------
 def column_exists(cursor, table, column):
@@ -98,6 +64,7 @@ def init_db():
     c = conn()
     cur = c.cursor()
 
+    # Users Table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -110,6 +77,7 @@ def init_db():
     if not column_exists(cur, "users", "paid_at"):
         cur.execute("ALTER TABLE users ADD paid_at DATETIME")
 
+    # Profiles Table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS profiles (
             user_id INT PRIMARY KEY,
@@ -139,11 +107,12 @@ def init_db():
         if not column_exists(cur, "profiles", col):
             cur.execute(f"ALTER TABLE profiles ADD {col} {col_type}")
 
+    # Payments Table
     cur.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT,
-            reference VARCHAR(50),
+            reference VARCHAR(50) UNIQUE,
             poll_url TEXT,
             paid TINYINT DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -159,7 +128,53 @@ def init_db():
     c.close()
 
 # -------------------------------------------------
-# USER
+# PAYMENTS
+# -------------------------------------------------
+def create_payment(uid, reference, poll_url):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        INSERT INTO payments (user_id, reference, poll_url)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE poll_url=%s
+    """, (uid, reference, poll_url, poll_url))
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_pending_payments():
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM payments WHERE paid = 0")
+    rows = cur.fetchall()
+    cur.close()
+    c.close()
+    return rows
+
+def mark_payment_paid(reference):
+    c = conn()
+    cur = c.cursor()
+    # Check by reference since it's the primary identifier from PesePay
+    cur.execute("UPDATE payments SET paid = 1, paid_at = %s WHERE reference = %s",
+                (datetime.utcnow(), reference))
+    c.commit()
+    cur.close()
+    c.close()
+
+def update_payment_poll(uid, reference, poll_url):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        INSERT INTO payments (user_id, reference, poll_url)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE poll_url=%s
+    """, (uid, reference, poll_url, poll_url))
+    c.commit()
+    cur.close()
+    c.close()
+
+# -------------------------------------------------
+# USER MANAGEMENT
 # -------------------------------------------------
 def get_user_by_phone(phone):
     c = conn()
@@ -196,17 +211,17 @@ def activate_user(uid):
     cur.close()
     c.close()
 
-def get_user_gender(uid):
+def get_user_phone(uid):
     c = conn()
     cur = c.cursor()
-    cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
+    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
     row = cur.fetchone()
     cur.close()
     c.close()
     return row[0] if row else None
 
 # -------------------------------------------------
-# PROFILE
+# PROFILE MANAGEMENT
 # -------------------------------------------------
 def ensure_profile(uid):
     c = conn()
@@ -226,42 +241,34 @@ def update_profile(uid, field, value):
     cur.close()
     c.close()
 
-# -------------------------------------------------
-# DISTANCE
-# -------------------------------------------------
-def compute_distance(lat1, lon1, lat2, lon2):
-    if None in (lat1, lon1, lat2, lon2):
-        return None
-    R = 6371
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
-    c = 2*asin(sqrt(a))
-    return R*c
+def get_user_gender(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    return row[0] if row else None
 
-# -------------------------------------------------
-# RESET PROFILE
-# -------------------------------------------------
+def get_profile_name(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT name FROM profiles WHERE user_id = %s", (uid,))
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    return row[0] if row and row[0] else "Customer"
+
 def reset_profile(uid):
     c = conn()
     cur = c.cursor()
     cur.execute("""
         UPDATE profiles SET
-            gender = NULL,
-            name = NULL,
-            age = NULL,
-            location = NULL,
-            intent = NULL,
-            preferred_gender = NULL,
-            age_min = NULL,
-            age_max = NULL,
-            contact_phone = NULL,
-            temp_contact_phone = NULL,
-            bio = NULL,
-            hobbies = NULL,
-            personality_traits = NULL,
-            latitude = NULL,
-            longitude = NULL
+            gender = NULL, name = NULL, age = NULL, location = NULL,
+            intent = NULL, preferred_gender = NULL, age_min = NULL,
+            age_max = NULL, contact_phone = NULL, temp_contact_phone = NULL,
+            bio = NULL, hobbies = NULL, personality_traits = NULL,
+            latitude = NULL, longitude = NULL
         WHERE user_id = %s
     """, (uid,))
     c.commit()
@@ -269,11 +276,8 @@ def reset_profile(uid):
     c.close()
 
 # -------------------------------------------------
-# MATCHING (AI-BASED WITHOUT EMBEDDINGS)
+# MATCHING LOGIC
 # -------------------------------------------------
-
-import random
-
 def get_matches(user_id):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -290,91 +294,36 @@ def get_matches(user_id):
 
     matches = []
     for cand in candidates:
-        if not gender_match(user, cand):
-            continue
-        if not age_match(user, cand):
-            continue
-        if not intent_match(user, cand):
-            continue
-        matches.append(cand)
+        if gender_match(user, cand) and age_match(user, cand) and intent_match(user, cand):
+            matches.append(cand)
 
     if matches:
         matches = random.sample(matches, min(2, len(matches)))
 
     return matches
 
-def get_user_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row else None
-
-def opposite_gender(g):
-    if not g:
-        return None
-    g = g.lower()
-    if g == "male":
-        return "female"
-    if g == "female":
-        return "male"
-    return None
-
-
-
 def gender_match(user, cand):
-    user_gender = user.get("gender")
-    cand_gender = cand.get("gender")
-
-    if not user_gender or not cand_gender:
-        return False
-
-    # heterosexual only
-    if user_gender == cand_gender:
-        return False
-
-    return True
-
+    u_g = user.get("gender")
+    c_g = cand.get("gender")
+    if not u_g or not c_g: return False
+    return u_g != c_g  # Basic heterosexual logic
 
 def age_match(user, cand):
     try:
-        return (
-            user["age_min"] <= cand["age"] <= user["age_max"] and
-            cand["age_min"] <= user["age"] <= cand["age_max"]
-        )
-    except TypeError:
-        return False  # handle missing/None values
+        return (user["age_min"] <= cand["age"] <= user["age_max"] and
+                cand["age_min"] <= user["age"] <= cand["age_max"])
+    except: return False
 
 def intent_match(user, cand):
     compatible = INTENT_COMPATIBILITY.get(user.get("intent"), [])
     return cand.get("intent") in compatible
 
-
-def get_profile_name(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT name FROM profiles WHERE user_id = %s", (uid,))
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row and row[0] else "Customer"
-
-
-def get_temp_contact_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        "SELECT temp_contact_phone FROM profiles WHERE user_id = %s",
-        (uid,)
-    )
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row else None
-
-
-
-
-
+# -------------------------------------------------
+# GEOLOCATION (OPTIONAL)
+# -------------------------------------------------
+def compute_distance(lat1, lon1, lat2, lon2):
+    if None in (lat1, lon1, lat2, lon2): return None
+    R = 6371
+    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
+    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
+    return R * (2 * asin(sqrt(a)))
