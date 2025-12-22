@@ -100,7 +100,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
 
         # Define method-specific required fields
         required_fields = {}
-        if method == "ECOCASH":
+        if method == "PZW211":
             required_fields = {"ecocashNumber": phone}
         elif method == "INNBUCKS":
             required_fields = {"innbucksNumber": phone}
@@ -221,7 +221,7 @@ def handle_message(phone: str, text: str) -> str:
         return "❗ Please choose 1 or 2."
 
     if state in ["AWAITING_ECOCASH", "AWAITING_INNBUCKS"]:
-        method = "ECOCASH" if state == "AWAITING_ECOCASH" else "INNBUCKS"
+        method = "PZW211" if state == "AWAITING_ECOCASH" else "INNBUCKS"
         clean_num = msg.replace("+263", "0").replace("263", "0").strip()
         
         if create_pesepay_payment(uid, clean_num, method):
