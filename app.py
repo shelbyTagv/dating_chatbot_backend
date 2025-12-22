@@ -131,7 +131,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
         response = pesepay.make_seamless_payment(
             payment,
             "Shelby Date Connection Fee",
-            2.00,
+            5.00,
             required_fields
         )
 
