@@ -2,13 +2,13 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import json
+import random
 import mysql.connector.pooling
 from datetime import datetime
-from math import radians, cos, sin, asin, sqrt
-from openai import OpenAI
 
-
+# -------------------------------------------------
+# CONSTANTS & COMPATIBILITY
+# -------------------------------------------------
 INTENT_COMPATIBILITY = {
     "girlfriend": ["boyfriend"],
     "boyfriend": ["girlfriend"],
@@ -19,13 +19,6 @@ INTENT_COMPATIBILITY = {
     "friend": ["friend"],
     "benten": ["benten"]
 }
-
-
-
-# -------------------------------------------------
-# OPENAI
-# -------------------------------------------------
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # -------------------------------------------------
 # DB CONNECTION POOL
@@ -47,69 +40,26 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# PAYMENTS
-# -------------------------------------------------
-def create_payment(uid, reference, poll_url):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        INSERT INTO payments (user_id, reference, poll_url)
-        VALUES (%s, %s, %s)
-    """, (uid, reference, poll_url))
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_pending_payments():
-    c = conn()
-    cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM payments WHERE paid = 0")
-    rows = cur.fetchall()
-    cur.close()
-    c.close()
-    return rows
-
-def mark_payment_paid(payment_id):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE payments SET paid = 1, paid_at = %s WHERE id = %s",
-                (datetime.utcnow(), payment_id))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# COLUMN CHECK HELPER
+# INIT & MIGRATIONS
 # -------------------------------------------------
 def column_exists(cursor, table, column):
     cursor.execute("""
-        SELECT COUNT(*)
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = %s
-          AND COLUMN_NAME = %s
+        SELECT COUNT(*) FROM INFORMATION_SCHEMA.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = %s AND COLUMN_NAME = %s
     """, (table, column))
     return cursor.fetchone()[0] > 0
 
-# -------------------------------------------------
-# INIT + AUTO-MIGRATION
-# -------------------------------------------------
 def init_db():
-    c = conn()
-    cur = c.cursor()
-
+    c = conn(); cur = c.cursor()
     cur.execute("""
         CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone VARCHAR(20) UNIQUE,
             chat_state VARCHAR(32) DEFAULT 'NEW',
-            is_paid TINYINT DEFAULT 0
+            is_paid TINYINT DEFAULT 0,
+            paid_at DATETIME
         )
     """)
-
-    if not column_exists(cur, "users", "paid_at"):
-        cur.execute("ALTER TABLE users ADD paid_at DATETIME")
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS profiles (
             user_id INT PRIMARY KEY,
@@ -118,262 +68,120 @@ def init_db():
             age INT,
             location VARCHAR(100),
             intent VARCHAR(50),
-            preferred_gender VARCHAR(10),
-            age_min INT,
-            age_max INT,
             contact_phone VARCHAR(20),
+            age_min INT DEFAULT 18,
+            age_max INT DEFAULT 99,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
-
-    profile_columns = {
-        "bio": "TEXT",
-        "hobbies": "TEXT",
-        "personality_traits": "TEXT",
-        "latitude": "DECIMAL(9,6)",
-        "longitude": "DECIMAL(9,6)",
-        "temp_contact_phone": "VARCHAR(20)"
-    }
-
-    for col, col_type in profile_columns.items():
-        if not column_exists(cur, "profiles", col):
-            cur.execute(f"ALTER TABLE profiles ADD {col} {col_type}")
-
     cur.execute("""
         CREATE TABLE IF NOT EXISTS payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT,
-            reference VARCHAR(50),
+            reference VARCHAR(50) UNIQUE,
             poll_url TEXT,
             paid TINYINT DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
-
-    if not column_exists(cur, "payments", "paid_at"):
-        cur.execute("ALTER TABLE payments ADD paid_at DATETIME")
-
-    c.commit()
-    cur.close()
-    c.close()
+    c.commit(); cur.close(); c.close()
 
 # -------------------------------------------------
-# USER
+# PAYMENT OPERATIONS
+# -------------------------------------------------
+def create_payment(uid, reference, poll_url):
+    c = conn(); cur = c.cursor()
+    cur.execute("""
+        INSERT INTO payments (user_id, reference, poll_url)
+        VALUES (%s, %s, %s)
+        ON DUPLICATE KEY UPDATE poll_url = VALUES(poll_url)
+    """, (uid, reference, poll_url))
+    c.commit(); cur.close(); c.close()
+
+def get_pending_payments():
+    c = conn(); cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM payments WHERE paid = 0")
+    rows = cur.fetchall(); cur.close(); c.close()
+    return rows
+
+def get_pending_payments_for_user(uid):
+    c = conn(); cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM payments WHERE user_id = %s AND paid = 0 ORDER BY created_at DESC LIMIT 1", (uid,))
+    rows = cur.fetchall(); cur.close(); c.close()
+    return rows
+
+def mark_payment_paid(reference):
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE payments SET paid = 1 WHERE reference = %s", (reference,))
+    c.commit(); cur.close(); c.close()
+
+# -------------------------------------------------
+# USER & PROFILE OPERATIONS
 # -------------------------------------------------
 def get_user_by_phone(phone):
-    c = conn()
-    cur = c.cursor(dictionary=True)
+    c = conn(); cur = c.cursor(dictionary=True)
     cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
-    u = cur.fetchone()
-    cur.close()
-    c.close()
+    u = cur.fetchone(); cur.close(); c.close()
     return u
 
 def create_new_user(phone):
-    c = conn()
-    cur = c.cursor()
+    c = conn(); cur = c.cursor()
     cur.execute("INSERT INTO users (phone) VALUES (%s)", (phone,))
-    c.commit()
-    cur.close()
-    c.close()
+    c.commit(); cur.close(); c.close()
     return get_user_by_phone(phone)
 
 def set_state(uid, state):
-    c = conn()
-    cur = c.cursor()
+    c = conn(); cur = c.cursor()
     cur.execute("UPDATE users SET chat_state=%s WHERE id=%s", (state, uid))
-    c.commit()
-    cur.close()
-    c.close()
+    c.commit(); cur.close(); c.close()
 
 def activate_user(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE users SET is_paid=1, paid_at=%s, chat_state='PAID' WHERE id=%s",
-                (datetime.utcnow(), uid))
-    c.commit()
-    cur.close()
-    c.close()
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE users SET is_paid=1, paid_at=%s, chat_state='PAID' WHERE id=%s", (datetime.utcnow(), uid))
+    c.commit(); cur.close(); c.close()
 
-def get_user_gender(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row else None
-
-# -------------------------------------------------
-# PROFILE
-# -------------------------------------------------
 def ensure_profile(uid):
-    c = conn()
-    cur = c.cursor()
+    c = conn(); cur = c.cursor()
     cur.execute("SELECT user_id FROM profiles WHERE user_id=%s", (uid,))
     if not cur.fetchone():
         cur.execute("INSERT INTO profiles (user_id) VALUES (%s)", (uid,))
         c.commit()
-    cur.close()
-    c.close()
+    cur.close(); c.close()
 
 def update_profile(uid, field, value):
-    c = conn()
-    cur = c.cursor()
+    c = conn(); cur = c.cursor()
     cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, uid))
-    c.commit()
-    cur.close()
-    c.close()
+    c.commit(); cur.close(); c.close()
 
-# -------------------------------------------------
-# DISTANCE
-# -------------------------------------------------
-def compute_distance(lat1, lon1, lat2, lon2):
-    if None in (lat1, lon1, lat2, lon2):
-        return None
-    R = 6371
-    dlat = radians(lat2 - lat1)
-    dlon = radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
-    c = 2*asin(sqrt(a))
-    return R*c
-
-# -------------------------------------------------
-# RESET PROFILE
-# -------------------------------------------------
-def reset_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        UPDATE profiles SET
-            gender = NULL,
-            name = NULL,
-            age = NULL,
-            location = NULL,
-            intent = NULL,
-            preferred_gender = NULL,
-            age_min = NULL,
-            age_max = NULL,
-            contact_phone = NULL,
-            temp_contact_phone = NULL,
-            bio = NULL,
-            hobbies = NULL,
-            personality_traits = NULL,
-            latitude = NULL,
-            longitude = NULL
-        WHERE user_id = %s
-    """, (uid,))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# MATCHING (AI-BASED WITHOUT EMBEDDINGS)
-# -------------------------------------------------
-
-import random
-
-def get_matches(user_id):
-    c = conn()
-    cur = c.cursor(dictionary=True)
-
-    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
-    user = cur.fetchone()
-    if not user:
-        return []
-
-    cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
-    candidates = cur.fetchall()
-    cur.close()
-    c.close()
-
-    matches = []
-    for cand in candidates:
-        if not gender_match(user, cand):
-            continue
-        if not age_match(user, cand):
-            continue
-        if not intent_match(user, cand):
-            continue
-        matches.append(cand)
-
-    if matches:
-        matches = random.sample(matches, min(2, len(matches)))
-
-    return matches
-
-def get_user_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row else None
-
-def opposite_gender(g):
-    if not g:
-        return None
-    g = g.lower()
-    if g == "male":
-        return "female"
-    if g == "female":
-        return "male"
-    return None
-
-
-
-def gender_match(user, cand):
-    user_gender = user.get("gender")
-    cand_gender = cand.get("gender")
-
-    if not user_gender or not cand_gender:
-        return False
-
-    # heterosexual only
-    if user_gender == cand_gender:
-        return False
-
-    return True
-
-
-def age_match(user, cand):
-    try:
-        return (
-            user["age_min"] <= cand["age"] <= user["age_max"] and
-            cand["age_min"] <= user["age"] <= cand["age_max"]
-        )
-    except TypeError:
-        return False  # handle missing/None values
-
-def intent_match(user, cand):
-    compatible = INTENT_COMPATIBILITY.get(user.get("intent"), [])
-    return cand.get("intent") in compatible
-
+def get_user_gender(uid):
+    c = conn(); cur = c.cursor(); cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
+    row = cur.fetchone(); cur.close(); c.close(); return row[0] if row else None
 
 def get_profile_name(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT name FROM profiles WHERE user_id = %s", (uid,))
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row and row[0] else "Customer"
+    c = conn(); cur = c.cursor(); cur.execute("SELECT name FROM profiles WHERE user_id=%s", (uid,))
+    row = cur.fetchone(); cur.close(); c.close(); return row[0] if row else "Customer"
 
+def get_user_phone(uid):
+    c = conn(); cur = c.cursor(); cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
+    row = cur.fetchone(); cur.close(); c.close(); return row[0] if row else None
 
-def get_temp_contact_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute(
-        "SELECT temp_contact_phone FROM profiles WHERE user_id = %s",
-        (uid,)
-    )
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row else None
+def reset_profile(uid):
+    c = conn(); cur = c.cursor()
+    cur.execute("UPDATE profiles SET gender=NULL, name=NULL, age=NULL, location=NULL, intent=NULL, contact_phone=NULL WHERE user_id=%s", (uid,))
+    c.commit(); cur.close(); c.close()
 
+# -------------------------------------------------
+# MATCHING LOGIC
+# -------------------------------------------------
+def get_matches(user_id):
+    c = conn(); cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
+    u = cur.fetchone()
+    cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
+    candidates = cur.fetchall(); cur.close(); c.close()
+    matches = [cand for cand in candidates if gender_match(u, cand) and intent_match(u, cand)]
+    return random.sample(matches, min(2, len(matches)))
 
-
-
+def gender_match(u, c): return u.get("gender") != c.get("gender")
+def intent_match(u, c): return c.get("intent") in INTENT_COMPATIBILITY.get(u.get("intent"), [])
