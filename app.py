@@ -254,15 +254,35 @@ def handle_message(phone: str, text: str) -> str:
 
     if state in ["AWAITING_ECOCASH_USD", "AWAITING_ECOCASH_ZIG", "AWAITING_INNBUCKS_USD"]:
         clean_num = msg.strip().replace("+263", "0").replace("263", "0")
-        # ZiG rate is 40:1 ($2.00 = 80 ZiG)
-        if state == "AWAITING_ECOCASH_USD": success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 2.00)
-        elif state == "AWAITING_ECOCASH_ZIG": success = create_pesepay_payment(uid, clean_num, "PZW201", "ZIG", 80.00)
-        else: success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 2.00)
+        
+        # Determine parameters based on state
+        if state == "AWAITING_ECOCASH_USD":
+            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 2.00)
+            method_name = "EcoCash USD"
+        elif state == "AWAITING_ECOCASH_ZIG":
+            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 80.00) # Updated to ZWG
+            method_name = "EcoCash ZiG"
+        else:
+            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 2.00)
+            method_name = "InnBucks"
 
         if success:
             db_manager.set_state(uid, "PAYMENT_PENDING")
-            return "⏳ *Prompt Sent!* Enter your PIN. Expires in 1 min.\n\nType *STATUS* to check manually."
-        return "❌ Error sending prompt. Try again."
+            
+            # --- CUSTOM SUCCESS MESSAGE ---
+            return (
+                f"🚀 *Payment Initiated via {method_name}!*\n\n"
+                f"📲 Please check the phone for **{clean_num}** right now. "
+                "A prompt will appear asking for your **PIN**.\n\n"
+                "⏳ *What to do next:*\n"
+                "1. Enter your PIN carefully.\n"
+                "2. Wait patiently while we process the transaction.\n"
+                "3. This usually takes **less than 3 minutes**.\n\n"
+                "✅ Once confirmed, your matches will be sent automatically to this chat! "
+                "You can also type *STATUS* to check manually."
+            )
+        
+        return "❌ Error sending prompt. Please check your number and try again."
 
     if state == "PAYMENT_PENDING":
         if msg_l == "status":
