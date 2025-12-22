@@ -244,13 +244,23 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "contact_phone", msg)
 
         matches = db_manager.get_matches(uid)
-        if not matches: db_manager.set_state(uid, "NEW"); return "✅ No matches found yet. Try again later."
+        if not matches: 
+            # Change state to NO_MATCHES instead of NEW
+            db_manager.set_state(uid, "NO_MATCHES") 
+            return ("✅ Profile saved! Currently, there are no matches fitting your criteria.\n\n"
+                    "We will notify you when someone joins! Type *STATUS* later to check again.")
         
-        db_manager.set_state(uid, "CHOOSE_CURRENCY")
-        reply = "🔥 *Matches Found!* 🔥\n"
-        for m in matches: reply += f"• {m['name']} — {m['location']}\n"
-        reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
-        return reply
+        if state == "NO_MATCHES":
+            if msg_l == "status" or msg_l == "hello":
+                matches = db_manager.get_matches(uid)
+                if matches:
+                    db_manager.set_state(uid, "CHOOSE_CURRENCY")
+                    reply = "🔥 *Good news! Matches Found!* 🔥\n"
+                    for m in matches: reply += f"• {m['name']} — {m['location']}\n"
+                    reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
+                    return reply
+                return "⏳ Still no matches yet. We are looking! Type *EXIT* to restart your profile."
+            return "Type *STATUS* to check for matches or *EXIT* to redo your profile."
 
     if state == "CHOOSE_CURRENCY":
         if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
