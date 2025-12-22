@@ -352,8 +352,27 @@ def intent_match(user, cand):
     return cand.get("intent") in compatible
 
 
+def get_profile_name(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT name FROM profiles WHERE user_id = %s", (uid,))
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    return row[0] if row and row[0] else "Customer"
 
 
+def get_temp_contact_phone(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute(
+        "SELECT temp_contact_phone FROM profiles WHERE user_id = %s",
+        (uid,)
+    )
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    return row[0] if row else None
 
 
 

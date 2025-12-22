@@ -80,29 +80,33 @@ def create_paynow_payment(uid: int, phone: str):
         return None
 
     # Get user name (safe fallback)
-    user = db_manager.get_user_by_id(uid)
-    customer_name = user.get("name") if user else "Customer"
+    customer_name = db_manager.get_profile_name(uid)
+    customer_phone = db_manager.get_temp_contact_phone(uid) or phone
+
+    if not customer_phone:
+        print("❌ Missing EcoCash number in profile")
 
     # 🔹 EXACT payload PesePay expects
     transaction_payload = {
-        "amountDetails": {
-            "amount": 2.00,
-            "currencyCode": "USD"
-        },
-        "merchantReference": transaction_id,
-        "reasonForPayment": "Shelby Date Connection Fee",
-        "returnUrl": RETURN_URL,
-        "resultUrl": RESULT_URL,
-        "paymentMethodCode": "ECOCASH",
-        "customer": {
-            "email": "noreply@shelbydates.com",
-            "phoneNumber": phone,
-            "name": customer_name
-        },
-        "paymentMethodRequiredFields": {
-            "customerPhone": phone
-        }
+    "amountDetails": {
+        "amount": 2.00,
+        "currencyCode": "USD"
+    },
+    "merchantReference": transaction_id,
+    "reasonForPayment": "Shelby Date Connection Fee",
+    "returnUrl": RETURN_URL,
+    "resultUrl": RESULT_URL,
+    "paymentMethodCode": "ECOCASH",
+    "customer": {
+        "email": "noreply@shelbydates.com",
+        "phoneNumber": customer_phone,
+        "name": customer_name
+    },
+    "paymentMethodRequiredFields": {
+        "customerPhone": customer_phone
     }
+}
+
 
     # 🔹 Wrapper is REQUIRED
     request_body = {
