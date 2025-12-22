@@ -145,7 +145,12 @@ def handle_message(phone: str, text: str) -> str:
     msg = text.strip(); msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
     if not user: user = db_manager.create_new_user(phone)
-    uid, state = user["id"],db_manager.ensure_profile(uid), user["chat_state"] or "NEW"
+    uid = user["id"]
+
+    db_manager.ensure_profile(uid)
+
+    state = user["chat_state"] or "NEW"
+
 
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
