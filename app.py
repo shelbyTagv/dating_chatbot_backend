@@ -26,6 +26,13 @@ ENCRYPTION_KEY = os.getenv("PESEPAY_ENCRYPTION_KEY")
 RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
 RESULT_URL = os.getenv("PAYNOW_RESULT_URL")
 
+
+integration_key = INTEGRATION_KEY.strip()
+encryption_key = ENCRYPTION_KEY.strip()
+
+# Convert hex string to bytes (AES expects 16, 24, or 32 bytes)
+aes_key_bytes = bytes.fromhex(encryption_key)  # 16 bytes
+
 # Initialize PesePay SDK
 pesepay = Pesepay(INTEGRATION_KEY, ENCRYPTION_KEY)
 pesepay.return_url = RETURN_URL
