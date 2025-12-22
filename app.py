@@ -130,9 +130,9 @@ def create_pesepay_payment(uid, phone, method, currency, amount):
 INTENT_MAP = {"1":"sugar mummy","2":"sugar daddy","3":"benten","4":"girlfriend","5":"boyfriend","6":"1 night stand","7":"just vibes","8":"friend"}
 AGE_MAP = {"1":(18,25),"2":(26,30),"3":(31,35),"4":(36,40),"5":(41,50),"6":(50,99)}
 # Allowed options for MALE users
-MALE_OPTIONS = [1, 4, 6, 7, 8] 
+MALE_OPTIONS = ["1", "4", "6", "7", "8"] 
 # Allowed options for FEMALE users
-FEMALE_OPTIONS = [2, 3,5, 6, 7, 8]
+FEMALE_OPTIONS = ["2", "3","5" "6", "7", "8"]
 
 # -------------------------------------------------
 # CHAT HANDLER
@@ -158,44 +158,33 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "gender", msg_l)
         db_manager.set_state(uid, "GET_INTENT")
 
+        # We still show different menus, but we won't "block" their choice in the next step
         if msg_l == "male":
-            return ("💖 What are you looking for, Gent?\n\n"
+            return ("💖 What are you looking for?\n\n"
                     "1️⃣ Sugar mummy\n"
                     "4️⃣ Girlfriend\n"
                     "6️⃣ 1 night stand\n"
                     "7️⃣ Just vibes\n"
                     "8️⃣ Friend")
         else: # female
-            return ("💖 What are you looking for, Lady?\n\n"
+            return ("💖 What are you looking for?\n\n"
                     "2️⃣ Sugar daddy\n"
                     "3️⃣ Benten\n"
-                    "5️⃣ Boyfriend\n"
+                    "4️⃣ Girlfriend\n"
                     "6️⃣ 1 night stand\n"
                     "7️⃣ Just vibes\n"
                     "8️⃣ Friend")
 
     if state == "GET_INTENT":
-        user_gender = db_manager.get_user_gender(uid)
-        
-        # FIX: If DB returns None, we need to handle it gracefully
-        if not user_gender:
-            print(f"CRITICAL: User {uid} gender not found in DB. Defaulting to male.")
-            user_gender = "male" 
-
-        # Ensure these are STRINGS in your constants
-        MALE_OPTIONS = ["1", "4", "6", "7", "8"]
-        FEMALE_OPTIONS = ["2", "3", "4", "5", "6", "7", "8"]
-
-        allowed_list = MALE_OPTIONS if user_gender == "male" else FEMALE_OPTIONS
-        
-        if msg not in allowed_list:
-            return f"❗ Option {msg} is not available for {user_gender}s. Please choose from the list above."
-
+        # Straightforward: Just get the intent from the map. No gender validation.
         intent = INTENT_MAP.get(msg)
+        
+        if not intent:
+            return "❗ Please choose a valid option (1-8)."
+
         db_manager.update_profile(uid, "intent", intent)
         db_manager.set_state(uid, "GET_AGE_RANGE")
         return "🎂 Preferred age range:\n1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
-        
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r: return "❗ Choose 1–6."

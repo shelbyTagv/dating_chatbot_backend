@@ -242,16 +242,13 @@ def update_profile(uid, field, value):
     c.close()
 
 def get_user_gender(uid):
-    c=conn()
+    c = conn()
     cur = c.cursor()
-    # Ensure you are querying the correct column (id vs phone)
-    cur.execute("SELECT gender FROM profiles WHERE id = ?", (uid,))
-    result = cur.fetchone()
+    cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
+    row = cur.fetchone()
+    cur.close()
     c.close()
-    
-    if result and result[0]:
-        return result[0].lower()
-    return "male"  # Default to male if something goes wrong to avoid 'None'
+    return row[0] if row else None
 
 def get_profile_name(uid):
     c = conn()
