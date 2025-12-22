@@ -96,32 +96,42 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
     try:
         customer_name = db_manager.get_profile_name(uid)
         
+        # Normalize phone
+        clean_num = phone.strip().replace(" ", "").replace("+263", "0").replace("263", "0")
+        
+        # Validate EcoCash
+        if method == "PZW211":
+            if not clean_num.isdigit() or len(clean_num) != 10:
+                print("Invalid EcoCash number:", clean_num)
+                return False
+            required_fields = {"ecocashNumber": clean_num}
+        elif method == "INNBUCKS":
+            if not clean_num.isdigit() or len(clean_num) != 10:
+                print("Invalid InnBucks number:", clean_num)
+                return False
+            required_fields = {"innbucksNumber": clean_num}
+        else:
+            print("Unknown payment method:", method)
+            return False
+
         # Create payment object
         payment = pesepay.create_payment(
             'USD', 
             method, 
             'noreply@shelbydates.com', 
-            phone, 
+            clean_num,  # PesePay sometimes expects phone here too
             customer_name
         )
 
-        # Define method-specific required fields
-        required_fields = {}
-        if method == "PZW211":
-            required_fields = {"ecocashNumber": phone}
-        elif method == "INNBUCKS":
-            required_fields = {"innbucksNumber": phone}
-
         # Execute seamless payment
         response = pesepay.make_seamless_payment(
-            payment, 
-            "Shelby Date Connection Fee", 
-            2.00, 
+            payment,
+            "Shelby Date Connection Fee",
+            2.00,
             required_fields
         )
 
         if response.success:
-            # Save reference and poll_url to DB for the background thread
             db_manager.create_payment(uid, response.reference_number, response.poll_url)
             return True
         else:
@@ -131,6 +141,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
     except Exception as e:
         print(f"Payment Exception: {str(e)}")
         return False
+
 
 # -------------------------------------------------
 # CHATBOT LOGIC
