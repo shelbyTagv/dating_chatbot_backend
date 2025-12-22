@@ -220,6 +220,22 @@ def get_user_phone(uid):
     c.close()
     return row[0] if row else None
 
+
+def reset_user_payment(uid):
+    c=conn()
+    try:
+        cur = c.cursor()
+        # Updating the 'users' table specifically
+        query = "UPDATE users SET is_paid = 0 WHERE id = %s"
+        cur.execute(query, (uid,))
+        c.commit()
+        print(f"DEBUG: Payment status reset for User ID {uid}")
+    except Exception as e:
+        print(f"Error resetting payment for User {uid}: {e}")
+    finally:
+        cur.close()
+        c.close()
+
 # -------------------------------------------------
 # PROFILE MANAGEMENT
 # -------------------------------------------------

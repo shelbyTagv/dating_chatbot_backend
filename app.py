@@ -62,6 +62,9 @@ def process_successful_payment(uid, reference):
         msg += f"• {m['name']}: {m['contact_phone']}\n"
     
     send_whatsapp_message(phone, msg)
+
+    # 2. RESET logic: Update is_paid back to 0 so they pay next time
+    db_manager.reset_user_payment(uid) # You will need to add this function to db_manager.py
     db_manager.set_state(uid, "NEW")
 
 # -------------------------------------------------
