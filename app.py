@@ -110,7 +110,9 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
         # 🔴 IMPORTANT: method MUST be "ECOCASH"
         if method == "PZW211":
             required_fields = {
-                "ecocashNumber": clean_num
+                "ecocashNumber": clean_num,
+                "mobileNumber": clean_num,
+                "phoneNumber": clean_num
             }
         elif method == "INNBUCKS":
             required_fields = {
