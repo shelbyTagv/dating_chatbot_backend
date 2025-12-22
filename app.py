@@ -76,14 +76,12 @@ def create_paynow_payment(uid: int, phone: str):
     encryption_key = os.getenv("PESEPAY_ENCRYPTION_KEY")
 
     if not integration_key or not encryption_key:
-        print("❌ ERROR: Missing PesePay environment variables")
+        print("❌ Missing PesePay keys")
         return None
 
-    payload = {
-        "amountDetails": {
-            "amount": 2,
-            "currencyCode": "USD"
-    },
+    transaction_payload = {
+        "amount": 2.00,
+        "currencyCode": "USD",
         "reason": "Shelby Date Connection Fee",
         "reference": transaction_id,
         "merchantUserId": str(uid),
@@ -91,16 +89,19 @@ def create_paynow_payment(uid: int, phone: str):
         "resultUrl": RESULT_URL
     }
 
-    # ---- SIGN PAYLOAD ----
+    payload = {
+        "payload": transaction_payload
+    }
+
     payload_string = json.dumps(
-        payload,
+        transaction_payload,
         separators=(",", ":"),
         sort_keys=True
     )
 
     signature = hmac.new(
-        encryption_key.encode("utf-8"),
-        payload_string.encode("utf-8"),
+        encryption_key.encode(),
+        payload_string.encode(),
         hashlib.sha256
     ).hexdigest()
 
@@ -112,43 +113,34 @@ def create_paynow_payment(uid: int, phone: str):
     }
 
     try:
-        response = requests.post(
+        r = requests.post(
             PESEPAY_API_URL,
             json=payload,
             headers=headers,
             timeout=15
         )
 
-        print("PesePay STATUS:", response.status_code)
-        print("PesePay RESPONSE:", response.text)
+        print("PesePay STATUS:", r.status_code)
+        print("PesePay RESPONSE:", r.text)
 
-        if response.status_code not in (200, 201):
-            return None
-
-        data = response.json()
+        data = r.json()
 
         if not data.get("success"):
-            print("❌ PesePay rejected request:", data)
+            print("❌ PesePay rejected:", data)
             return None
 
-        checkout_url = (
-            data.get("checkoutUrl")
-            or data.get("redirectUrl")
-            or data.get("data", {}).get("checkoutUrl")
-        )
+        checkout_url = data.get("checkoutUrl") or data.get("redirectUrl")
 
         if not checkout_url:
-            print("❌ No checkout URL returned by PesePay")
+            print("❌ No checkout URL returned")
             return None
 
-        # Save transaction locally
         db_manager.create_payment(uid, transaction_id, None)
 
-        # ✅ RETURN CHECKOUT LINK
         return checkout_url
 
     except Exception as e:
-        print("❌ PesePay exception:", str(e))
+        print("❌ PesePay exception:", e)
         return None
 
 
