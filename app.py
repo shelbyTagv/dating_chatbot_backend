@@ -245,7 +245,7 @@ def handle_message(phone: str, text: str) -> str:
 
         if create_pesepay_payment(uid, clean_num, method):
             db_manager.set_state(uid, "PAYMENT_PENDING")
-            return f"⏳ *Payment Initiated via {method}*. Please confirm on your phone."
+            return f"⏳ *Payment Initiated via {method}*. Please confirm on your phone and wait for a minute to get your contact details"
         else:
             return "❌ Payment initiation failed. Check number and try again."
 
