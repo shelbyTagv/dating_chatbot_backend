@@ -95,7 +95,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
     try:
         customer_name = db_manager.get_profile_name(uid) or "Shelby User"
 
-        # Normalize number
+        # Normalize number to 07XXXXXXXX
         clean_num = (
             phone.replace(" ", "")
                  .replace("+263", "0")
@@ -104,15 +104,14 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
         )
 
         if not clean_num.isdigit() or len(clean_num) != 10:
-            print("❌ Invalid EcoCash number:", clean_num)
+            print("❌ Invalid phone number format:", clean_num)
             return False
 
-        # 🔴 IMPORTANT: method MUST be "ECOCASH"
-        if method == "PZW211":
+        # --- PREPARE REQUIRED FIELDS ---
+        # The key MUST be 'customerPhoneNumber' for EcoCash/PZW211
+        if method == "PZW211" or method == "ECOCASH":
             required_fields = {
-                "ecocashNumber": clean_num,
-                "mobileNumber": clean_num,
-                "phoneNumber": clean_num
+                "customerPhoneNumber": clean_num
             }
         elif method == "INNBUCKS":
             required_fields = {
@@ -122,14 +121,18 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
             print("❌ Unsupported payment method:", method)
             return False
 
+        # Step 1: Create the Payment Object
+        # SDK Signature: create_payment(currency, methodCode, email, phone, name)
         payment = pesepay.create_payment(
             "USD",
             method,
             "noreply@shelbydates.com",
-            clean_num,
+            clean_num, # Number must be here too
             customer_name
         )
 
+        # Step 2: Execute the Seamless Payment
+        # SDK Signature: make_seamless_payment(payment, reason, amount, required_fields)
         response = pesepay.make_seamless_payment(
             payment,
             "Shelby Date Connection Fee",
@@ -143,6 +146,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
                 response.reference_number,
                 response.poll_url
             )
+            print(f"✅ Payment Initiated: {response.reference_number}")
             return True
 
         print("❌ PesePay Error:", response.message)
@@ -151,7 +155,6 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
     except Exception as e:
         print("❌ Payment Exception:", str(e))
         return False
-
 
 # -------------------------------------------------
 # CHATBOT LOGIC
