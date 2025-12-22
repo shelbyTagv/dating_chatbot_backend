@@ -95,11 +95,11 @@ def create_paynow_payment(uid: int, phone: str):
         "paymentMethodCode": "ECOCASH",
         "customer": {
             "email": "noreply@shelbydates.com",
-            "phoneNumber": customer_phone,
-            "name": customer_name
+            "phoneNumber": "0779319913",
+            "name": "Talent"
         },
         "paymentMethodRequiredFields": {
-            "mobileNumber": customer_phone   # 🔥 REQUIRED
+            "ecocashNumber": "0779319913" # 🔥 REQUIRED
         }
     }
 
