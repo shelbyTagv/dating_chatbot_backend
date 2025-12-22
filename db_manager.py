@@ -250,6 +250,7 @@ def get_user_gender(uid):
     c.close()
     return row[0] if row else None
 
+
 def get_profile_name(uid):
     c = conn()
     cur = c.cursor()
