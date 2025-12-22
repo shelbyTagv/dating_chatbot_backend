@@ -92,38 +92,42 @@ def startup():
 # PESEPAY SEAMLESS LOGIC
 # -------------------------------------------------
 def create_pesepay_payment(uid: int, phone: str, method: str):
-    """Integrates EcoCash and InnBucks via PesePay Seamless."""
     try:
-        customer_name = db_manager.get_profile_name(uid)
-        
-        # Normalize phone
-        clean_num = phone.strip().replace(" ", "").replace("+263", "0").replace("263", "0")
-        
-        # Validate EcoCash
-        if method == "PZW211":
-            if not clean_num.isdigit() or len(clean_num) != 10:
-                print("Invalid EcoCash number:", clean_num)
-                return False
-            required_fields = {"ecocashNumber": clean_num}
-        elif method == "INNBUCKS":
-            if not clean_num.isdigit() or len(clean_num) != 10:
-                print("Invalid InnBucks number:", clean_num)
-                return False
-            required_fields = {"innbucksNumber": clean_num}
-        else:
-            print("Unknown payment method:", method)
+        customer_name = db_manager.get_profile_name(uid) or "Shelby User"
+
+        # Normalize number
+        clean_num = (
+            phone.replace(" ", "")
+                 .replace("+263", "0")
+                 .replace("263", "0")
+                 .strip()
+        )
+
+        if not clean_num.isdigit() or len(clean_num) != 10:
+            print("❌ Invalid EcoCash number:", clean_num)
             return False
 
-        # Create payment object
+        # 🔴 IMPORTANT: method MUST be "ECOCASH"
+        if method == "ECOCASH":
+            required_fields = {
+                "ecocashNumber": clean_num
+            }
+        elif method == "INNBUCKS":
+            required_fields = {
+                "innbucksNumber": clean_num
+            }
+        else:
+            print("❌ Unsupported payment method:", method)
+            return False
+
         payment = pesepay.create_payment(
-            'USD', 
-            method, 
-            'noreply@shelbydates.com', 
-            clean_num,  # PesePay sometimes expects phone here too
+            "USD",
+            method,
+            "noreply@shelbydates.com",
+            clean_num,
             customer_name
         )
 
-        # Execute seamless payment
         response = pesepay.make_seamless_payment(
             payment,
             "Shelby Date Connection Fee",
@@ -132,14 +136,18 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
         )
 
         if response.success:
-            db_manager.create_payment(uid, response.reference_number, response.poll_url)
+            db_manager.create_payment(
+                uid,
+                response.reference_number,
+                response.poll_url
+            )
             return True
-        else:
-            print(f"PesePay Error: {response.message}")
-            return False
+
+        print("❌ PesePay Error:", response.message)
+        return False
 
     except Exception as e:
-        print(f"Payment Exception: {str(e)}")
+        print("❌ Payment Exception:", str(e))
         return False
 
 
@@ -239,13 +247,13 @@ def handle_message(phone: str, text: str) -> str:
         return "❗ Please choose 1 or 2."
 
     if state in ["AWAITING_ECOCASH", "AWAITING_INNBUCKS"]:
-        method = "PZW211" if state == "AWAITING_ECOCASH" else "INNBUCKS"
+        method = "ECOCASH" if state == "AWAITING_ECOCASH" else "INNBUCKS"
     
         # Normalize number to 0XXXXXXXXX format
         clean_num = msg.strip().replace(" ", "").replace("+263", "0").replace("263", "0")
     
     #    Validate number length
-        if method == "PZW211" and (not clean_num.isdigit() or len(clean_num) != 10):
+        if method == "ECOCASH" and (not clean_num.isdigit() or len(clean_num) != 10):
             return "❌ Invalid EcoCash number. Enter in format 07XXXXXXXX."
 
         if create_pesepay_payment(uid, clean_num, method):
