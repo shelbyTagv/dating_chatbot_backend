@@ -120,7 +120,7 @@ def create_paynow_payment(uid: int, phone: str):
     ).hexdigest()
 
     headers = {
-        "Authorization": integration_key,
+        "Authorization": f"Bearer {integration_key}",
         "X-Signature": signature,
         "Content-Type": "application/json",
         "Accept": "application/json"
