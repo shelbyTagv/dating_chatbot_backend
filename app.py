@@ -94,68 +94,48 @@ def startup():
 def create_pesepay_payment(uid: int, phone: str, method: str):
     try:
         customer_name = db_manager.get_profile_name(uid) or "Shelby User"
+        clean_num = phone.replace(" ", "").replace("+263", "0").replace("263", "0").strip()
 
-        # Normalize number to 07XXXXXXXX
-        clean_num = (
-            phone.replace(" ", "")
-                 .replace("+263", "0")
-                 .replace("263", "0")
-                 .strip()
-        )
-
-        if not clean_num.isdigit() or len(clean_num) != 10:
-            print("❌ Invalid phone number format:", clean_num)
-            return False
-
-        # --- PREPARE REQUIRED FIELDS ---
-        # The key MUST be 'customerPhoneNumber' for EcoCash/PZW211
+        # 1. Correct Required Fields for Seamless
         if method == "PZW211" or method == "ECOCASH":
-            required_fields = {
-                "customerPhoneNumber": clean_num
-            }
+            required_fields = {"customerPhoneNumber": clean_num}
         elif method == "INNBUCKS":
-            required_fields = {
-                "innbucksNumber": clean_num
-            }
+            required_fields = {"innbucksNumber": clean_num}
         else:
-            print("❌ Unsupported payment method:", method)
             return False
 
-        # Step 1: Create the Payment Object
-        # SDK Signature: create_payment(currency, methodCode, email, phone, name)
-        payment = pesepay.create_payment(
-            "USD",
-            method,
-            "noreply@shelbydates.com",
-            clean_num, # Number must be here too
-            customer_name
-        )
+        # 2. Create Payment Object
+        payment = pesepay.create_payment("USD", method, "noreply@shelbydates.com", clean_num, customer_name)
 
-        # Step 2: Execute the Seamless Payment
-        # SDK Signature: make_seamless_payment(payment, reason, amount, required_fields)
-        response = pesepay.make_seamless_payment(
-            payment,
-            "Shelby Date Connection Fee",
-            2.00,
-            required_fields
-        )
+        # 3. Execute Payment
+        response = pesepay.make_seamless_payment(payment, "Shelby Connection Fee", 2.00, required_fields)
 
         if response.success:
-            db_manager.create_payment(
-                uid,
-                response.reference_number,
-                response.poll_url
-            )
-            print(f"✅ Payment Initiated: {response.reference_number}")
-            return True
+            # --- FIX: ATTRIBUTE LOOKUP ---
+            # The SDK often uses referenceNumber (no underscore) or wraps it in a transaction object
+            ref = getattr(response, 'referenceNumber', getattr(response, 'reference_number', None))
+            poll = getattr(response, 'pollUrl', getattr(response, 'poll_url', None))
+
+            # If attributes are still missing, try looking inside a nested transaction object
+            if not ref and hasattr(response, 'transaction'):
+                ref = getattr(response.transaction, 'referenceNumber', None)
+                poll = getattr(response.transaction, 'pollUrl', None)
+
+            if ref and poll:
+                db_manager.create_payment(uid, ref, poll)
+                print(f"✅ Success! Ref: {ref}")
+                return True
+            else:
+                print(f"❌ PesePay responded success but missing fields: {vars(response)}")
+                return False
 
         print("❌ PesePay Error:", response.message)
         return False
 
     except Exception as e:
-        print("❌ Payment Exception:", str(e))
+        # This will print the full error to your Railway logs for debugging
+        print(f"❌ Payment Exception: {str(e)}")
         return False
-
 # -------------------------------------------------
 # CHATBOT LOGIC
 # -------------------------------------------------
