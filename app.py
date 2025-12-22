@@ -76,6 +76,8 @@ def check_pending_payments():
                         msg += f"• {m['name']}: {m['contact_phone']}\n"
                     
                     send_whatsapp_message(user_phone, msg)
+
+                    db_manager.set_state(p['user_id'], "NEW")
             
             time.sleep(30) # Poll every 30 seconds
         except Exception as e:
@@ -205,7 +207,7 @@ def handle_message(phone: str, text: str) -> str:
     if state == "GET_LOCATION":
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
-        return "📞 Enter your WhatsApp contact number:"
+        return "📞 Enter your the Contact where you can be contacted:"
 
     # --- Match & Payment Logic ---
     if state == "GET_PHONE":
