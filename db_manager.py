@@ -23,6 +23,29 @@ INTENT_COMPATIBILITY = {
     "benten": ["benten"]
 }
 
+INTENT_GROUPS = {
+    "girlfriend": "SERIOUS",
+    "boyfriend": "SERIOUS",
+
+    "1 night stand": "CASUAL",
+    "just vibes": "CASUAL",
+
+    "sugar daddy": "SUGAR",
+    "sugar mummy": "SUGAR",
+
+    "friend": "SOCIAL",
+    "benten": "SOCIAL",
+}
+
+GROUP_COMPATIBILITY = {
+    "SERIOUS": ["SERIOUS"],
+    "CASUAL": ["CASUAL", "SOCIAL"],
+    "SUGAR": ["SUGAR"],
+    "SOCIAL": ["SOCIAL", "CASUAL"],
+}
+
+
+
 client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # -------------------------------------------------
@@ -332,8 +355,20 @@ def age_match(user, cand):
     except: return False
 
 def intent_match(user, cand):
-    compatible = INTENT_COMPATIBILITY.get(user.get("intent"), [])
-    return cand.get("intent") in compatible
+    user_intent = user.get("intent")
+    cand_intent = cand.get("intent")
+
+    if not user_intent or not cand_intent:
+        return False
+
+    user_group = INTENT_GROUPS.get(user_intent)
+    cand_group = INTENT_GROUPS.get(cand_intent)
+
+    if not user_group or not cand_group:
+        return False
+
+    return cand_group in GROUP_COMPATIBILITY.get(user_group, [])
+
 
 # -------------------------------------------------
 # GEOLOCATION (OPTIONAL)
