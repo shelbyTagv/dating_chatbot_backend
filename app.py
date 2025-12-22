@@ -130,9 +130,9 @@ def create_pesepay_payment(uid, phone, method, currency, amount):
 INTENT_MAP = {"1":"sugar mummy","2":"sugar daddy","3":"benten","4":"girlfriend","5":"boyfriend","6":"1 night stand","7":"just vibes","8":"friend"}
 AGE_MAP = {"1":(18,25),"2":(26,30),"3":(31,35),"4":(36,40),"5":(41,50),"6":(50,99)}
 # Allowed options for MALE users
-MALE_OPTIONS = ["1", "4", "6", "7", "8"] 
+MALE_OPTIONS = [1, 4, 6, 7, 8] 
 # Allowed options for FEMALE users
-FEMALE_OPTIONS = ["2", "3","5", "6", "7", "8"]
+FEMALE_OPTIONS = [2, 3,5, 6, 7, 8]
 
 # -------------------------------------------------
 # CHAT HANDLER
@@ -169,7 +169,6 @@ def handle_message(phone: str, text: str) -> str:
             return ("💖 What are you looking for, Lady?\n\n"
                     "2️⃣ Sugar daddy\n"
                     "3️⃣ Benten\n"
-                    "4️⃣ Girlfriend\n"
                     "5️⃣ Boyfriend\n"
                     "6️⃣ 1 night stand\n"
                     "7️⃣ Just vibes\n"
