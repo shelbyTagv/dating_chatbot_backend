@@ -108,7 +108,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
             return False
 
         # 🔴 IMPORTANT: method MUST be "ECOCASH"
-        if method == "ECOCAS":
+        if method == "PW201":
             required_fields = {
                 "ecocashNumber": clean_num
             }
@@ -247,13 +247,13 @@ def handle_message(phone: str, text: str) -> str:
         return "❗ Please choose 1 or 2."
 
     if state in ["AWAITING_ECOCASH", "AWAITING_INNBUCKS"]:
-        method = "ECOCASH" if state == "AWAITING_ECOCASH" else "INNBUCKS"
+        method = "PZW201" if state == "AWAITING_ECOCASH" else "INNBUCKS"
     
         # Normalize number to 0XXXXXXXXX format
         clean_num = msg.strip().replace(" ", "").replace("+263", "0").replace("263", "0")
     
     #    Validate number length
-        if method == "ECOCASh" and (not clean_num.isdigit() or len(clean_num) != 10):
+        if method == "PZW201" and (not clean_num.isdigit() or len(clean_num) != 10):
             return "❌ Invalid EcoCash number. Enter in format 07XXXXXXXX."
 
         if create_pesepay_payment(uid, clean_num, method):
