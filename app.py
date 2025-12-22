@@ -79,8 +79,8 @@ def create_paynow_payment(uid: int, phone: str):
         print("❌ Missing PesePay keys")
         return None
 
-    # ✅ INITIATE endpoint expects FLAT payload
-    payload = {
+    # 🔹 THIS is the transaction payload PesePay wants
+    transaction_payload = {
         "amount": 2.00,
         "currencyCode": "USD",
         "reason": "Shelby Date Connection Fee",
@@ -90,8 +90,14 @@ def create_paynow_payment(uid: int, phone: str):
         "resultUrl": RESULT_URL
     }
 
+    # 🔹 THIS wrapper is REQUIRED
+    request_body = {
+        "payload": transaction_payload
+    }
+
+    # 🔐 Signature is computed over the *payload only*
     payload_string = json.dumps(
-        payload,
+        transaction_payload,
         separators=(",", ":"),
         sort_keys=True
     )
@@ -103,7 +109,7 @@ def create_paynow_payment(uid: int, phone: str):
     ).hexdigest()
 
     headers = {
-        "Authorization": integration_key,
+        "Authorization": integration_key,   # ❗ no Bearer
         "X-Signature": signature,
         "Content-Type": "application/json",
         "Accept": "application/json"
@@ -112,7 +118,7 @@ def create_paynow_payment(uid: int, phone: str):
     try:
         r = requests.post(
             PESEPAY_API_URL,
-            json=payload,
+            json=request_body,
             headers=headers,
             timeout=15
         )
@@ -120,12 +126,11 @@ def create_paynow_payment(uid: int, phone: str):
         print("PesePay STATUS:", r.status_code)
         print("PesePay RAW RESPONSE:", repr(r.text))
 
-        # ❗ Do NOT assume JSON
         if r.status_code not in (200, 201):
             return None
 
         if not r.text:
-            print("❌ Empty response body from PesePay")
+            print("❌ Empty response body")
             return None
 
         data = r.json()
@@ -150,6 +155,7 @@ def create_paynow_payment(uid: int, phone: str):
     except Exception as e:
         print("❌ PesePay exception:", str(e))
         return None
+
 
 
 
