@@ -79,7 +79,8 @@ def create_paynow_payment(uid: int, phone: str):
         print("❌ Missing PesePay keys")
         return None
 
-    transaction_payload = {
+    # ✅ INITIATE endpoint expects FLAT payload
+    payload = {
         "amount": 2.00,
         "currencyCode": "USD",
         "reason": "Shelby Date Connection Fee",
@@ -89,19 +90,15 @@ def create_paynow_payment(uid: int, phone: str):
         "resultUrl": RESULT_URL
     }
 
-    payload = {
-        "payload": transaction_payload
-    }
-
     payload_string = json.dumps(
-        transaction_payload,
+        payload,
         separators=(",", ":"),
         sort_keys=True
     )
 
     signature = hmac.new(
-        encryption_key.encode(),
-        payload_string.encode(),
+        encryption_key.encode("utf-8"),
+        payload_string.encode("utf-8"),
         hashlib.sha256
     ).hexdigest()
 
@@ -121,7 +118,15 @@ def create_paynow_payment(uid: int, phone: str):
         )
 
         print("PesePay STATUS:", r.status_code)
-        print("PesePay RESPONSE:", r.text)
+        print("PesePay RAW RESPONSE:", repr(r.text))
+
+        # ❗ Do NOT assume JSON
+        if r.status_code not in (200, 201):
+            return None
+
+        if not r.text:
+            print("❌ Empty response body from PesePay")
+            return None
 
         data = r.json()
 
@@ -129,7 +134,10 @@ def create_paynow_payment(uid: int, phone: str):
             print("❌ PesePay rejected:", data)
             return None
 
-        checkout_url = data.get("checkoutUrl") or data.get("redirectUrl")
+        checkout_url = (
+            data.get("checkoutUrl")
+            or data.get("redirectUrl")
+        )
 
         if not checkout_url:
             print("❌ No checkout URL returned")
@@ -140,7 +148,7 @@ def create_paynow_payment(uid: int, phone: str):
         return checkout_url
 
     except Exception as e:
-        print("❌ PesePay exception:", e)
+        print("❌ PesePay exception:", str(e))
         return None
 
 
