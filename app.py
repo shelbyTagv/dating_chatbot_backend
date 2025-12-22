@@ -229,14 +229,19 @@ def handle_message(phone: str, text: str) -> str:
 
     if state in ["AWAITING_ECOCASH", "AWAITING_INNBUCKS"]:
         method = "PZW211" if state == "AWAITING_ECOCASH" else "INNBUCKS"
-        clean_num = msg.replace("+263", "0").replace("263", "0").strip()
-        
+    
+        # Normalize number to 0XXXXXXXXX format
+        clean_num = msg.strip().replace(" ", "").replace("+263", "0").replace("263", "0")
+    
+    #    Validate number length
+        if method == "PZW211" and (not clean_num.isdigit() or len(clean_num) != 10):
+            return "❌ Invalid EcoCash number. Enter in format 07XXXXXXXX."
+
         if create_pesepay_payment(uid, clean_num, method):
             db_manager.set_state(uid, "PAYMENT_PENDING")
-            return (f"⏳ *Payment Initiated via {method}*\n\nCheck your phone for a prompt and enter your PIN. "
-                    "I will send the contact details here as soon as the payment is confirmed.")
+            return f"⏳ *Payment Initiated via {method}*. Please confirm on your phone."
         else:
-            return "❌ Connection failed. Please check your number and try again, or type EXIT."
+            return "❌ Payment initiation failed. Check number and try again."
 
     if state == "PAYMENT_PENDING":
         return "⏳ Still waiting for payment confirmation. Please ensure you've entered your PIN on your phone."
