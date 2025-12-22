@@ -9,6 +9,7 @@ from fastapi import FastAPI, Request, HTTPException
 from fastapi.responses import JSONResponse
 from pesepay import Pesepay  #
 
+import re
 import db_manager
 
 # -------------------------------------------------
@@ -49,40 +50,43 @@ def send_whatsapp_message(phone: str, text: str):
     except Exception as e:
         print("WhatsApp send error:", e)
 
+
+def process_successful_payment(uid, reference):
+    db_manager.mark_payment_paid(reference)
+    db_manager.activate_user(uid)
+    phone = db_manager.get_user_phone(uid)
+    matches = db_manager.get_matches(uid)
+    
+    msg = "✅ *Payment Successful!*\n\n📞 Here are your matches:\n\n"
+    for m in matches:
+        msg += f"• {m['name']}: {m['contact_phone']}\n"
+    
+    send_whatsapp_message(phone, msg)
+    db_manager.set_state(uid, "NEW")
+
 # -------------------------------------------------
 # PAYMENT POLLING (Background Worker)
 # -------------------------------------------------
 def check_pending_payments():
-    """Periodically checks PesePay for transaction updates."""
     while True:
         try:
             pending = db_manager.get_pending_payments()
+            now = time.time()
             for p in pending:
-                poll_url = p.get("poll_url")
-                if not poll_url:
+                # 60 Second Timeout logic
+                if (now - p['created_at'].timestamp()) > 60:
+                    db_manager.set_state(p['user_id'], "NEW")
+                    db_manager.mark_payment_paid(p['reference'])
+                    send_whatsapp_message(db_manager.get_user_phone(p['user_id']), 
+                                          "❌ *Payment Failed!* You took more than 1 minute to pay. Type *HELLO* to try again.")
                     continue
 
-                # Check payment status using poll_url
-                response = pesepay.poll_transaction(poll_url)
-                if response.success and response.paid:
-                    db_manager.mark_payment_paid(p['id'])
-                    db_manager.activate_user(p['user_id'])
-                    
-                    user_phone = db_manager.get_user_phone(p['user_id'])
-                    matches = db_manager.get_matches(p['user_id'])
-                    
-                    msg = "✅ *Payment Confirmed!*\n\n📞 Contact details for your matches:\n\n"
-                    for m in matches:
-                        msg += f"• {m['name']}: {m['contact_phone']}\n"
-                    
-                    send_whatsapp_message(user_phone, msg)
-
-                    db_manager.set_state(p['user_id'], "NEW")
-            
-            time.sleep(30) # Poll every 30 seconds
-        except Exception as e:
-            print(f"Polling error: {e}")
+                if p.get("poll_url"):
+                    res = pesepay.poll_transaction(p['poll_url'])
+                    if res.success and res.paid:
+                        process_successful_payment(p['user_id'], p['reference'])
             time.sleep(10)
+        except Exception as e: print("Poll Error:", e); time.sleep(10)
 
 @app.on_event("startup")
 def startup():
@@ -90,101 +94,100 @@ def startup():
     # Start the background thread for automatic payment confirmation
     threading.Thread(target=check_pending_payments, daemon=True).start()
 
+
+
+
+def is_valid_zim_phone(number):
+    # Matches 077, 078, 071 followed by 7 digits
+    pattern = r"^(077|078|071)\d{7}$"
+    return re.match(pattern, number)
 # -------------------------------------------------
 # PESEPAY SEAMLESS LOGIC
 # -------------------------------------------------
-def create_pesepay_payment(uid: int, phone: str, method: str):
+# -------------------------------------------------
+# PESEPAY SEAMLESS
+# -------------------------------------------------
+def create_pesepay_payment(uid, phone, method, currency, amount):
     try:
-        customer_name = db_manager.get_profile_name(uid) or "Shelby User"
-        clean_num = phone.replace(" ", "").replace("+263", "0").replace("263", "0").strip()
-
-        # 1. Correct Required Fields for Seamless
-        if method == "PZW211" or method == "ECOCASH":
-            required_fields = {"customerPhoneNumber": clean_num}
-        elif method == "INNBUCKS":
-            required_fields = {"innbucksNumber": clean_num}
-        else:
-            return False
-
-        # 2. Create Payment Object
-        payment = pesepay.create_payment("USD", method, "noreply@shelbydates.com", clean_num, customer_name)
-
-        # 3. Execute Payment
-        response = pesepay.make_seamless_payment(payment, "Shelby Connection Fee", 2.00, required_fields)
+        clean_num = phone.replace("+263", "0").replace("263", "0").strip()
+        # EcoCash uses customerPhoneNumber, InnBucks uses innbucksNumber
+        fields = {"customerPhoneNumber": clean_num} if "PZW21" in method or "PZW20" in method else {"innbucksNumber": clean_num}
+        
+        payment = pesepay.create_payment(currency, method, "noreply@shelbydates.com", clean_num, db_manager.get_profile_name(uid))
+        response = pesepay.make_seamless_payment(payment, "Shelby Fee", amount, fields)
 
         if response.success:
-            # --- FIX: ATTRIBUTE LOOKUP ---
-            # The SDK often uses referenceNumber (no underscore) or wraps it in a transaction object
             ref = getattr(response, 'referenceNumber', getattr(response, 'reference_number', None))
             poll = getattr(response, 'pollUrl', getattr(response, 'poll_url', None))
-
-            # If attributes are still missing, try looking inside a nested transaction object
-            if not ref and hasattr(response, 'transaction'):
-                ref = getattr(response.transaction, 'referenceNumber', None)
-                poll = getattr(response.transaction, 'pollUrl', None)
-
             if ref and poll:
                 db_manager.create_payment(uid, ref, poll)
-                print(f"✅ Success! Ref: {ref}")
                 return True
-            else:
-                print(f"❌ PesePay responded success but missing fields: {vars(response)}")
-                return False
-
-        print("❌ PesePay Error:", response.message)
         return False
-
-    except Exception as e:
-        # This will print the full error to your Railway logs for debugging
-        print(f"❌ Payment Exception: {str(e)}")
-        return False
+    except Exception as e: print("Pay Error:", e); return False
 # -------------------------------------------------
 # CHATBOT LOGIC
 # -------------------------------------------------
 INTENT_MAP = {"1":"sugar mummy","2":"sugar daddy","3":"benten","4":"girlfriend","5":"boyfriend","6":"1 night stand","7":"just vibes","8":"friend"}
 AGE_MAP = {"1":(18,25),"2":(26,30),"3":(31,35),"4":(36,40),"5":(41,50),"6":(50,99)}
+# Allowed options for MALE users
+MALE_OPTIONS = ["1", "4", "6", "7", "8"] 
+# Allowed options for FEMALE users
+FEMALE_OPTIONS = ["2", "3", "4", "6", "7", "8"]
+
+# -------------------------------------------------
+# CHAT HANDLER
+# -------------------------------------------------
+INTENT_MAP = {"1":"sugar mummy","2":"sugar daddy","3":"benten","4":"girlfriend","5":"boyfriend","6":"1 night stand","7":"just vibes","8":"friend"}
 
 def handle_message(phone: str, text: str) -> str:
-    msg = text.strip()
-    msg_l = msg.lower()
-
+    msg = text.strip(); msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
-    if not user:
-        user = db_manager.create_new_user(phone)
+    if not user: user = db_manager.create_new_user(phone)
+    uid, state = user["id"], user["chat_state"] or "NEW"
 
-    uid = user["id"]
-    state = user["chat_state"] or "NEW"
-    db_manager.ensure_profile(uid)
+    if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
-    if msg_l == "exit":
-        db_manager.set_state(uid, "NEW")
-        return "❌ Conversation ended. Type *HELLO* to start again."
-
-    # --- Registration States ---
     if state == "NEW":
-        db_manager.reset_profile(uid)
-        db_manager.set_state(uid, "GET_GENDER")
-        return "👋 Welcome to Shelby Date! Find love privately.\n\nPlease tell us your gender:\n• MALE\n• FEMALE\n• OTHER"
+        db_manager.reset_profile(uid); db_manager.set_state(uid, "GET_GENDER")
+        return "👋 Welcome to Shelby Date!\n\nPlease select your gender:\n• MALE\n• FEMALE"
 
     if state == "GET_GENDER":
-        if msg_l not in ["male", "female", "other"]: return "❗ Reply with *MALE*, *FEMALE* or *OTHER*."
+        if msg_l not in ["male", "female"]: 
+            return "❗ Please type MALE or FEMALE."
+        
         db_manager.update_profile(uid, "gender", msg_l)
-        db_manager.set_state(uid, "WELCOME")
-        return "✅ Saved! Type *HELLO* to continue."
-
-    if state == "WELCOME":
         db_manager.set_state(uid, "GET_INTENT")
-        return "💖 What are you looking for?\n\n1️⃣ Sugar mummy\n2️⃣ Sugar daddy\n3️⃣ Benten\n4️⃣ Girlfriend\n5️⃣ Boyfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend"
+
+        if msg_l == "male":
+            return ("💖 What are you looking for?\n\n"
+                    "1️⃣ Sugar mummy\n"
+                    "4️⃣ Girlfriend\n"
+                    "6️⃣ 1 night stand\n"
+                    "7️⃣ Just vibes\n"
+                    "8️⃣ Friend")
+        else: # female
+            return ("💖 What are you looking for?\n\n"
+                    "2️⃣ Sugar daddy\n"
+                    "3️⃣ Benten\n"
+                    "4️⃣ Girlfriend\n"
+                    "6️⃣ 1 night stand\n"
+                    "7️⃣ Just vibes\n"
+                    "8️⃣ Friend")
 
     if state == "GET_INTENT":
+        # Get the user's gender from the DB to validate their choice
+        user_gender = db_manager.get_user_gender(uid) # Ensure this function exists in db_manager
+        
+        allowed_list = MALE_OPTIONS if user_gender == "male" else FEMALE_OPTIONS
+        
+        if msg not in allowed_list:
+            return "❗ That option is not available for you. Please choose from the list above."
+
         intent = INTENT_MAP.get(msg)
-        if not intent: return "❗ Choose 1–8."
         db_manager.update_profile(uid, "intent", intent)
-        gender = db_manager.get_user_gender(uid)
-        db_manager.update_profile(uid, "preferred_gender", "female" if gender == "male" else "male")
         db_manager.set_state(uid, "GET_AGE_RANGE")
         return "🎂 Preferred age range:\n1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
-
+        
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r: return "❗ Choose 1–6."
@@ -192,65 +195,85 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "age_max", r[1])
         db_manager.set_state(uid, "GET_NAME")
         return "📝 What is your name?"
+        
 
     if state == "GET_NAME":
+        # Check if the name is too short or contains weird characters
+        if len(msg) < 3 or len(msg) > 20:
+            return "❗ Please enter a valid name (3–20 characters)."
+        
         db_manager.update_profile(uid, "name", msg)
         db_manager.set_state(uid, "GET_AGE")
         return "🎂 How old are you?"
-
+        
     if state == "GET_AGE":
-        if not msg.isdigit(): return "❗ Enter a number."
-        db_manager.update_profile(uid, "age", int(msg))
+        if not msg.isdigit(): 
+            return "❗ Please enter your age as a number (e.g., 25)."
+        
+        age = int(msg)
+        if age < 18:
+            db_manager.set_state(uid, "NEW")
+            return "❌ Sorry, you must be 18 or older to use this service."
+        if age > 80:
+            return "❗ Please enter a realistic age."
+            
+        db_manager.update_profile(uid, "age", age)
         db_manager.set_state(uid, "GET_LOCATION")
         return "📍 Where are you located?"
-
+        
+        
     if state == "GET_LOCATION":
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHONE")
         return "📞 Enter your the Contact where you can be contacted:"
 
-    # --- Match & Payment Logic ---
     if state == "GET_PHONE":
+        clean_num = msg.strip().replace(" ", "").replace("+263", "0")
+        if not is_valid_zim_phone(clean_num):
+            return "❗ Invalid number. Please enter a Zimbabwean number (e.g., 0772123456)."
+
         db_manager.update_profile(uid, "contact_phone", msg)
         matches = db_manager.get_matches(uid)
-        if not matches:
-            db_manager.set_state(uid, "NEW")
-            return "✅ Profile saved! No matches found yet. We will notify you later."
+        if not matches: db_manager.set_state(uid, "NEW"); return "✅ No matches found yet. Try again later."
         
-        db_manager.set_state(uid, "CHOOSE_METHOD")
-        reply = "🔥 *Matches Found!* 🔥\n\n"
-        for m in matches:
-            reply += f"• {m['name']} ({m['age']}) — {m['location']}\n"
-        reply += "\nSelect payment method to unlock contacts:\n1️⃣ EcoCash\n2️⃣ InnBucks"
+        db_manager.set_state(uid, "CHOOSE_CURRENCY")
+        reply = "🔥 *Matches Found!* 🔥\n"
+        for m in matches: reply += f"• {m['name']} — {m['location']}\n"
+        reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
         return reply
 
-    if state == "CHOOSE_METHOD":
-        if msg == "1":
-            db_manager.set_state(uid, "AWAITING_ECOCASH")
-            return "💰 Enter EcoCash number (e.g. 0779319913):"
-        elif msg == "2":
-            db_manager.set_state(uid, "AWAITING_INNBUCKS")
-            return "💰 Enter InnBucks number (e.g. 0779319913):"
-        return "❗ Please choose 1 or 2."
+    if state == "CHOOSE_CURRENCY":
+        if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
+        if msg == "2": db_manager.set_state(uid, "AWAITING_ECOCASH_ZIG"); return "💰 Enter EcoCash ZiG number:"
+        return "❗ Choose 1 or 2."
 
-    if state in ["AWAITING_ECOCASH", "AWAITING_INNBUCKS"]:
-        method = "PZW211" if state == "AWAITING_ECOCASH" else "INNBUCKS"
-    
-        # Normalize number to 0XXXXXXXXX format
-        clean_num = msg.strip().replace(" ", "").replace("+263", "0").replace("263", "0")
-    
-    #    Validate number length
-        if method == "PZW211" and (not clean_num.isdigit() or len(clean_num) != 10):
-            return "❌ Invalid EcoCash number. Enter in format 07XXXXXXXX."
+    if state == "CHOOSE_METHOD_USD":
+        if msg == "1": db_manager.set_state(uid, "AWAITING_ECOCASH_USD"); return "💰 Enter EcoCash USD number:"
+        if msg == "2": db_manager.set_state(uid, "AWAITING_INNBUCKS_USD"); return "💰 Enter InnBucks number:"
+        return "❗ Choose 1 or 2."
 
-        if create_pesepay_payment(uid, clean_num, method):
+    if state in ["AWAITING_ECOCASH_USD", "AWAITING_ECOCASH_ZIG", "AWAITING_INNBUCKS_USD"]:
+        clean_num = msg.strip().replace("+263", "0").replace("263", "0")
+        # ZiG rate is 40:1 ($2.00 = 80 ZiG)
+        if state == "AWAITING_ECOCASH_USD": success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 2.00)
+        elif state == "AWAITING_ECOCASH_ZIG": success = create_pesepay_payment(uid, clean_num, "PZW201", "ZIG", 80.00)
+        else: success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 2.00)
+
+        if success:
             db_manager.set_state(uid, "PAYMENT_PENDING")
-            return f"⏳ *Payment Initiated via {method}*. Please confirm on your phone and wait for a minute to get your contact details"
-        else:
-            return "❌ Payment initiation failed. Check number and try again."
+            return "⏳ *Prompt Sent!* Enter your PIN. Expires in 1 min.\n\nType *STATUS* to check manually."
+        return "❌ Error sending prompt. Try again."
 
     if state == "PAYMENT_PENDING":
-        return "⏳ Still waiting for payment confirmation. Please ensure you've entered your PIN on your phone."
+        if msg_l == "status":
+            pending = db_manager.get_pending_payments_for_user(uid)
+            if not pending: return "❌ No active payment. Type *HELLO*."
+            res = pesepay.poll_transaction(pending[0]['poll_url'])
+            if res.success and res.paid:
+                process_successful_payment(uid, pending[0]['reference'])
+                return "✅ Verified! Sending matches..."
+            return "⏳ Not paid yet. Enter PIN and type *STATUS* again."
+        return "⏳ Waiting for PIN. Type *STATUS* to check."
 
     return "❗ Type *HELLO* to start."
 
