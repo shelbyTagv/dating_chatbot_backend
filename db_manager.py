@@ -12,37 +12,24 @@ from openai import OpenAI
 # -------------------------------------------------
 # CONSTANTS & CONFIG
 # -------------------------------------------------
-INTENT_COMPATIBILITY = {
-    "girlfriend": ["boyfriend"],
-    "boyfriend": ["girlfriend"],
-    "sugar mummy": ["sugar daddy"],
-    "sugar daddy": ["sugar mummy"],
-    "1 night stand": ["1 night stand", "just vibes"],
-    "just vibes": ["1 night stand", "just vibes"],
-    "friend": ["friend"],
-    "benten": ["benten"]
+# Define exactly who is compatible with whom
+# This follows your specific rules: Benten -> Sugar Mummy, etc.
+DIRECT_MATCH_MAP = {
+    "boyfriend": ["girlfriend", "sugar mummy"],
+    "girlfriend": ["boyfriend", "sugar daddy"],
+    "sugar mummy": ["boyfriend", "benten"],
+    "sugar daddy": ["girlfriend", "sugar baby"],
+    "benten": ["sugar mummy"],
+    "sugar baby": ["sugar daddy"],
+    # Casual/Social match with themselves
+    "1 night stand": ["1 night stand"],
+    "just vibes": ["just vibes"],
+    "friend": ["friend"]
 }
 
-INTENT_GROUPS = {
-    "girlfriend": "SERIOUS",
-    "boyfriend": "SERIOUS",
-
-    "1 night stand": "CASUAL",
-    "just vibes": "CASUAL",
-
-    "sugar daddy": "SUGAR",
-    "sugar mummy": "SUGAR",
-
-    "friend": "SOCIAL",
-    "benten": "SOCIAL",
-}
-
-GROUP_COMPATIBILITY = {
-    "SERIOUS": ["SERIOUS"],
-    "CASUAL": ["CASUAL", "SOCIAL"],
-    "SUGAR": ["SUGAR"],
-    "SOCIAL": ["SOCIAL", "CASUAL"],
-}
+# These are the categories you defined
+SERIOUS_INTENTS = ["boyfriend", "girlfriend", "sugar mummy", "sugar daddy", "benten", "sugar baby"]
+CASUAL_INTENTS = ["1 night stand", "just vibes", "friend"]
 
 
 
@@ -355,19 +342,22 @@ def age_match(user, cand):
     except: return False
 
 def intent_match(user, cand):
-    user_intent = user.get("intent")
-    cand_intent = cand.get("intent")
+    u_intent = user.get("intent")
+    c_intent = cand.get("intent")
 
-    if not user_intent or not cand_intent:
+    if not u_intent or not c_intent:
         return False
 
-    user_group = INTENT_GROUPS.get(user_intent)
-    cand_group = INTENT_GROUPS.get(cand_intent)
+    # Logic for Serious/Sugar categories (Direct Mapping)
+    if u_intent in DIRECT_MATCH_MAP:
+        return c_intent in DIRECT_MATCH_MAP[u_intent]
+    
+    # Logic for Casual categories (Match with same intent)
+    # If I want 'vibes', you must also want 'vibes'
+    if u_intent in CASUAL_INTENTS:
+        return u_intent == c_intent
 
-    if not user_group or not cand_group:
-        return False
-
-    return cand_group in GROUP_COMPATIBILITY.get(user_group, [])
+    return False
 
 
 # -------------------------------------------------

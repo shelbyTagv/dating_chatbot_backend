@@ -161,6 +161,13 @@ def handle_message(phone: str, text: str) -> str:
             return "❗ Please type MALE or FEMALE here."
         
         db_manager.update_profile(uid, "gender", msg_l)
+
+        # 2. AUTOMATIC PREFERENCE LOGIC:
+        # If user is male, preferred is female. If user is female, preferred is male.
+        preferred = "female" if msg_l == "male" else "male"
+        db_manager.update_profile(uid, "preferred_gender", preferred)
+
+
         db_manager.set_state(uid, "GET_INTENT")
 
         # We still show different menus, but we won't "block" their choice in the next step
