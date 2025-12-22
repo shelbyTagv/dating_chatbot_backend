@@ -243,7 +243,7 @@ def update_profile(uid, field, value):
 
 def get_user_gender(uid):
     c=conn()
-    cur = conn.cursor()
+    cur = c.cursor()
     # Ensure you are querying the correct column (id vs phone)
     cur.execute("SELECT gender FROM profiles WHERE id = ?", (uid,))
     result = cur.fetchone()
