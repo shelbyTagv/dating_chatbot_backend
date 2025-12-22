@@ -32,7 +32,7 @@ GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 #PAYNOW_URL = "https://www.paynow.co.zw/interface/initiatetransaction"
 
 # Example for sandbox testing
-PESEPAY_API_URL = "https://api.pesepay.com/api/payments-engine/v1/payments/initiate"
+PESEPAY_API_URL = "https://api.pesepay.com/api/payments-engine/v2/payments/make-payment"
 PESEPAY_INTEGRATION_KEY = os.getenv("PESEPAY_INTEGRATION_KEY")
 
 RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
@@ -79,23 +79,37 @@ def create_paynow_payment(uid: int, phone: str):
         print("❌ Missing PesePay keys")
         return None
 
-    # 🔹 THIS is the transaction payload PesePay wants
+    # Get user name (safe fallback)
+    user = db_manager.get_user_by_id(uid)
+    customer_name = user.get("name") if user else "Customer"
+
+    # 🔹 EXACT payload PesePay expects
     transaction_payload = {
-        "amount": 2.00,
-        "currencyCode": "USD",
-        "reason": "Shelby Date Connection Fee",
-        "reference": transaction_id,
-        "merchantUserId": str(uid),
+        "amountDetails": {
+            "amount": 2.00,
+            "currencyCode": "USD"
+        },
+        "merchantReference": transaction_id,
+        "reasonForPayment": "Shelby Date Connection Fee",
         "returnUrl": RETURN_URL,
-        "resultUrl": RESULT_URL
+        "resultUrl": RESULT_URL,
+        "paymentMethodCode": "ECOCASH",
+        "customer": {
+            "email": "noreply@shelbydates.com",
+            "phoneNumber": phone,
+            "name": customer_name
+        },
+        "paymentMethodRequiredFields": {
+            "customerPhone": phone
+        }
     }
 
-    # 🔹 THIS wrapper is REQUIRED
+    # 🔹 Wrapper is REQUIRED
     request_body = {
         "payload": transaction_payload
     }
 
-    # 🔐 Signature is computed over the *payload only*
+    # 🔐 SIGNATURE (sign INNER payload only)
     payload_string = json.dumps(
         transaction_payload,
         separators=(",", ":"),
@@ -105,11 +119,11 @@ def create_paynow_payment(uid: int, phone: str):
     signature = hmac.new(
         encryption_key.encode("utf-8"),
         payload_string.encode("utf-8"),
-        hashlib.sha256
+        hashlib.sha512   # 🔥 REQUIRED
     ).hexdigest()
 
     headers = {
-        "Authorization": integration_key,   # ❗ no Bearer
+        "Authorization": integration_key,   # ❗ NO "Bearer"
         "X-Signature": signature,
         "Content-Type": "application/json",
         "Accept": "application/json"
@@ -126,17 +140,19 @@ def create_paynow_payment(uid: int, phone: str):
         print("PesePay STATUS:", r.status_code)
         print("PesePay RAW RESPONSE:", repr(r.text))
 
+        # ❌ Hard fail
         if r.status_code not in (200, 201):
             return None
 
+        # ❌ Empty body
         if not r.text:
-            print("❌ Empty response body")
+            print("❌ Empty response body from PesePay")
             return None
 
         data = r.json()
 
         if not data.get("success"):
-            print("❌ PesePay rejected:", data)
+            print("❌ PesePay rejected request:", data)
             return None
 
         checkout_url = (
@@ -145,9 +161,10 @@ def create_paynow_payment(uid: int, phone: str):
         )
 
         if not checkout_url:
-            print("❌ No checkout URL returned")
+            print("❌ No checkout URL returned:", data)
             return None
 
+        # Save transaction
         db_manager.create_payment(uid, transaction_id, None)
 
         return checkout_url
@@ -155,6 +172,7 @@ def create_paynow_payment(uid: int, phone: str):
     except Exception as e:
         print("❌ PesePay exception:", str(e))
         return None
+
 
 
 
