@@ -140,13 +140,12 @@ FEMALE_OPTIONS = ["2", "3","5" "6", "7", "8"]
 # -------------------------------------------------
 # CHAT HANDLER
 # -------------------------------------------------
-INTENT_MAP = {"1":"sugar mummy","2":"sugar daddy","3":"benten","4":"girlfriend","5":"boyfriend","6":"1 night stand","7":"just vibes","8":"friend"}
 
 def handle_message(phone: str, text: str) -> str:
     msg = text.strip(); msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
     if not user: user = db_manager.create_new_user(phone)
-    uid, state = user["id"], user["chat_state"] or "NEW"
+    uid, state = user["id"],db_manager.ensure_profile(uid), user["chat_state"] or "NEW"
 
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
@@ -233,6 +232,7 @@ def handle_message(phone: str, text: str) -> str:
             return "❗ Invalid number. Please enter a Zimbabwean number (e.g., 0772123456)."
 
         db_manager.update_profile(uid, "contact_phone", msg)
+
         matches = db_manager.get_matches(uid)
         if not matches: db_manager.set_state(uid, "NEW"); return "✅ No matches found yet. Try again later."
         
