@@ -132,7 +132,7 @@ AGE_MAP = {"1":(18,25),"2":(26,30),"3":(31,35),"4":(36,40),"5":(41,50),"6":(50,9
 # Allowed options for MALE users
 MALE_OPTIONS = ["1", "4", "6", "7", "8"] 
 # Allowed options for FEMALE users
-FEMALE_OPTIONS = ["2", "3", "4", "6", "7", "8"]
+FEMALE_OPTIONS = ["2", "3","5", "6", "7", "8"]
 
 # -------------------------------------------------
 # CHAT HANDLER
@@ -159,29 +159,33 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.set_state(uid, "GET_INTENT")
 
         if msg_l == "male":
-            return ("💖 What are you looking for?\n\n"
+            return ("💖 What are you looking for, Gent?\n\n"
                     "1️⃣ Sugar mummy\n"
                     "4️⃣ Girlfriend\n"
                     "6️⃣ 1 night stand\n"
                     "7️⃣ Just vibes\n"
                     "8️⃣ Friend")
         else: # female
-            return ("💖 What are you looking for?\n\n"
+            return ("💖 What are you looking for, Lady?\n\n"
                     "2️⃣ Sugar daddy\n"
                     "3️⃣ Benten\n"
                     "4️⃣ Girlfriend\n"
+                    "5️⃣ Boyfriend\n"
                     "6️⃣ 1 night stand\n"
                     "7️⃣ Just vibes\n"
                     "8️⃣ Friend")
 
     if state == "GET_INTENT":
-        # Get the user's gender from the DB to validate their choice
-        user_gender = db_manager.get_user_gender(uid) # Ensure this function exists in db_manager
+        user_gender = db_manager.get_user_gender(uid)
         
+        # DEBUG: Print to your Railway logs to see what's happening
+        print(f"DEBUG: User {uid} is {user_gender} and chose {msg}")
+
         allowed_list = MALE_OPTIONS if user_gender == "male" else FEMALE_OPTIONS
         
         if msg not in allowed_list:
-            return "❗ That option is not available for you. Please choose from the list above."
+            # Tell them exactly why it failed
+            return f"❗ Option {msg} is not available for {user_gender} profiles. Please choose from the menu above."
 
         intent = INTENT_MAP.get(msg)
         db_manager.update_profile(uid, "intent", intent)
