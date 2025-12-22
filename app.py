@@ -121,7 +121,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
             return False
 
         payment = pesepay.create_payment(
-            "ZWG",
+            "USD",
             method,
             "noreply@shelbydates.com",
             clean_num,
