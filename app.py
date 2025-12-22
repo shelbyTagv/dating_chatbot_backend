@@ -177,14 +177,19 @@ def handle_message(phone: str, text: str) -> str:
     if state == "GET_INTENT":
         user_gender = db_manager.get_user_gender(uid)
         
-        # DEBUG: Print to your Railway logs to see what's happening
-        print(f"DEBUG: User {uid} is {user_gender} and chose {msg}")
+        # FIX: If DB returns None, we need to handle it gracefully
+        if not user_gender:
+            print(f"CRITICAL: User {uid} gender not found in DB. Defaulting to male.")
+            user_gender = "male" 
+
+        # Ensure these are STRINGS in your constants
+        MALE_OPTIONS = ["1", "4", "6", "7", "8"]
+        FEMALE_OPTIONS = ["2", "3", "4", "5", "6", "7", "8"]
 
         allowed_list = MALE_OPTIONS if user_gender == "male" else FEMALE_OPTIONS
         
         if msg not in allowed_list:
-            # Tell them exactly why it failed
-            return f"❗ Option {msg} is not available for {user_gender} profiles. Please choose from the menu above."
+            return f"❗ Option {msg} is not available for {user_gender}s. Please choose from the list above."
 
         intent = INTENT_MAP.get(msg)
         db_manager.update_profile(uid, "intent", intent)
