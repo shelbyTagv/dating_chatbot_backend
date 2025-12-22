@@ -121,7 +121,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
             return False
 
         payment = pesepay.create_payment(
-            "ZWL",
+            "USD",
             method,
             "noreply@shelbydates.com",
             clean_num,
@@ -131,7 +131,7 @@ def create_pesepay_payment(uid: int, phone: str, method: str):
         response = pesepay.make_seamless_payment(
             payment,
             "Shelby Date Connection Fee",
-            100,
+            2.00,
             required_fields
         )
 
