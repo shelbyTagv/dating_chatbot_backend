@@ -79,41 +79,34 @@ def create_paynow_payment(uid: int, phone: str):
         print("❌ Missing PesePay keys")
         return None
 
-    # Get user name (safe fallback)
     customer_name = db_manager.get_profile_name(uid)
     customer_phone = db_manager.get_temp_contact_phone(uid) or phone
 
-    if not customer_phone:
-        print("❌ Missing EcoCash number in profile")
-
-    # 🔹 EXACT payload PesePay expects
+    # 🔴 STRICT schema compliance
     transaction_payload = {
-    "amountDetails": {
-        "amount": 2.00,
-        "currencyCode": "USD"
-    },
-    "merchantReference": transaction_id,
-    "reasonForPayment": "Shelby Date Connection Fee",
-    "returnUrl": RETURN_URL,
-    "resultUrl": RESULT_URL,
-    "paymentMethodCode": "ECOCASH",
-    "customer": {
-        "email": "noreply@shelbydates.com",
-        "phoneNumber": customer_phone,
-        "name": customer_name
-    },
-    "paymentMethodRequiredFields": {
-        "customerPhone": customer_phone
+        "amountDetails": {
+            "amount": "2.00",          # ⚠️ STRING, not float
+            "currencyCode": "USD"
+        },
+        "merchantReference": transaction_id,
+        "reasonForPayment": "Shelby Date Connection Fee",
+        "returnUrl": RETURN_URL,
+        "resultUrl": RESULT_URL,
+        "paymentMethodCode": "ECOCASH",
+        "customer": {
+            "email": "noreply@shelbydates.com",
+            "phoneNumber": customer_phone,
+            "name": customer_name
+        },
+        "paymentMethodRequiredFields": {
+            "mobileNumber": customer_phone   # 🔥 REQUIRED
+        }
     }
-}
 
-
-    # 🔹 Wrapper is REQUIRED
     request_body = {
         "payload": transaction_payload
     }
 
-    # 🔐 SIGNATURE (sign INNER payload only)
     payload_string = json.dumps(
         transaction_payload,
         separators=(",", ":"),
@@ -123,11 +116,11 @@ def create_paynow_payment(uid: int, phone: str):
     signature = hmac.new(
         encryption_key.encode("utf-8"),
         payload_string.encode("utf-8"),
-        hashlib.sha512   # 🔥 REQUIRED
+        hashlib.sha512
     ).hexdigest()
 
     headers = {
-        "Authorization": integration_key,   # ❗ NO "Bearer"
+        "Authorization": integration_key,
         "X-Signature": signature,
         "Content-Type": "application/json",
         "Accept": "application/json"
@@ -144,38 +137,31 @@ def create_paynow_payment(uid: int, phone: str):
         print("PesePay STATUS:", r.status_code)
         print("PesePay RAW RESPONSE:", repr(r.text))
 
-        # ❌ Hard fail
         if r.status_code not in (200, 201):
             return None
 
-        # ❌ Empty body
         if not r.text:
-            print("❌ Empty response body from PesePay")
+            print("❌ Empty response body")
             return None
 
         data = r.json()
 
         if not data.get("success"):
-            print("❌ PesePay rejected request:", data)
+            print("❌ PesePay rejected:", data)
             return None
 
-        checkout_url = (
-            data.get("checkoutUrl")
-            or data.get("redirectUrl")
-        )
-
+        checkout_url = data.get("checkoutUrl") or data.get("redirectUrl")
         if not checkout_url:
-            print("❌ No checkout URL returned:", data)
+            print("❌ No checkout URL returned")
             return None
 
-        # Save transaction
         db_manager.create_payment(uid, transaction_id, None)
-
         return checkout_url
 
     except Exception as e:
         print("❌ PesePay exception:", str(e))
         return None
+
 
 
 
