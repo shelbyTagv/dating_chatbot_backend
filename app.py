@@ -181,29 +181,25 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
     # --- PROFILE COMMAND ---
     if msg_l == "profile":
-        profile = db_manager.get_profile(uid) # Ensure this fetches the picture column
+        profile = db_manager.get_profile(uid)
         
         if not profile or not profile.get("name"):
-            return "❌ Profile incomplete. Keep going or type *HELLO*!"
-        
-        # 1. Prepare the text summary
+            return "❌ Profile not found or incomplete. Type *HELLO* to start."
+
         caption = (f"👤 *YOUR PROFILE*\n"
-                   f"📝 *Name:* {profile.get('name')}\n"
-                   f"🎂 *Age:* {profile.get('age')}\n"
-                   f"📍 *Location:* {profile.get('location')}\n"
-                   f"💖 *Looking for:* {profile.get('intent')}\n"
-                   f"📞 *Contact:* {profile.get('contact_phone')}")
+                   f"━━━━━━━━━━━━━━━\n"
+                   f"📝 *Name:* {profile['name']}\n"
+                   f"🎂 *Age:* {profile['age']}\n"
+                   f"📍 *Location:* {profile['location']}\n"
+                   f"💖 *Looking for:* {profile.get('intent', 'N/A')}\n"
+                   f"📞 *Contact:* {profile.get('contact_phone', 'N/A')}")
+
+        if profile.get("picture"):
+            # Sends the photo with the profile text as a caption
+            send_whatsapp_image(phone, profile["picture"], caption)
+            return "" # Return empty string because the image function handled the reply
         
-        # 2. Check if a picture exists in the DB
-        photo_path = profile.get('picture')
-        
-        if photo_path:
-            # This sends the actual image file to your WhatsApp
-            send_whatsapp_image(phone, photo_path, caption)
-            return "" # Return empty string because the image function already sent the reply
-        else:
-            # If no photo, just send the text
-            return caption
+        return caption
 
 
 

@@ -250,3 +250,23 @@ def get_pending_payments_for_user(uid):
     cur.close()
     c.close()
     return rows
+
+def get_profile(uid):
+    c = conn() # Using your existing conn() function
+    cur = c.cursor()
+    # Explicitly naming columns to ensure we know exactly which index they are in
+    cur.execute("SELECT name, age, location, intent, contact_phone, picture FROM profiles WHERE user_id = %s", (uid,))
+    row = cur.fetchone()
+    cur.close()
+    c.close()
+    
+    if row:
+        return {
+            "name": row[0],
+            "age": row[1],
+            "location": row[2],
+            "intent": row[3],
+            "contact_phone": row[4],
+            "picture": row[5] # This is the photo URL/ID
+        }
+    return None
