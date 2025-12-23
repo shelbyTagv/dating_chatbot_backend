@@ -147,7 +147,10 @@ def handle_message(phone: str, text: str) -> str:
     if not user: user = db_manager.create_new_user(phone)
     uid = user["id"]
     db_manager.ensure_profile(uid)
-    state = user["chat_state"] or "NEW"
+    state = user.get("chat_state")
+    if not state:
+        state = "NEW"
+        db_manager.set_state(uid, "NEW")
 
 
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
@@ -158,7 +161,7 @@ def handle_message(phone: str, text: str) -> str:
             # ONLY reset the profile if they explicitly start over with a greeting
             db_manager.reset_profile(uid)
             db_manager.set_state(uid, "GET_GENDER")
-            return "👋 Welcome to Shelby Date!\n\nPlease select your gender:\n• MALE\n• FEMALE"
+            return "👋 Welcome to Shelby Dating Connections!\n\nPlease select your gender:\n• MALE\n• FEMALE"
         else:
             # If they send anything else, do NOT reset and just guide them
             return "👋 Welcome back! Please type *HELLO* or *HI* to start finding matches."
@@ -341,7 +344,9 @@ def handle_message(phone: str, text: str) -> str:
             return "⏳ Not paid yet. Enter PIN and type *STATUS* again."
         return "⏳ Waiting for PIN. Type *STATUS* to check."
 
-    return "❗ Type *HELLO* to start."
+    # This is the final fallback for any unrecognized message or state
+    db_manager.set_state(uid, "NEW")
+    return "❗ Chat ended: Please type *HELLO* or *HI* to start finding matches."
 
 
 
