@@ -158,6 +158,7 @@ def send_whatsapp_image(phone: str, file_id: str, caption: str):
 # -------------------------------------------------
 
 def handle_message(phone: str, text: str, payload: dict) -> str:
+    print(f"DEBUG: Processing message from {phone}. State: {db_manager.get_user_by_phone(phone)['chat_state']}")
     msg = text.strip() if text else ""
     msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
@@ -265,15 +266,19 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         return "📸 Almost done! Please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
-        # Check if the message contains an image (passed from webhook)
-        photo_id = payload.get("messageData", {}).get("imageMessageData", {}).get("fileId")
-        
-        if not photo_id:
-            return "❗ Please send an actual image file so matches can see who you are."
+        # 1. Look for the image in the payload
+        msg_data = payload.get("messageData", {})
+        image_data = msg_data.get("imageMessageData", {})
+        file_id = image_data.get("fileId")
 
-        db_manager.update_profile(uid, "picture", photo_id)
-        db_manager.set_state(uid, "GET_PHONE")
-        return "📞 Finally, enter the phone number where you can be contacted:"
+        if file_id:
+            # Success: Save and move to next state
+            db_manager.update_profile(uid, "picture", file_id)
+            db_manager.set_state(uid, "GET_PHONE")
+            return "✅ Photo received! 📞 Finally, enter the phone number where matches can contact you (e.g., 0772111222):"
+        
+        # 2. If they sent text instead of a photo
+        return "❗ Please send an actual **Photo** (as an attachment) so your matches can see you."
     
 
     # Insert this block before the other state checks in handle_message
@@ -408,7 +413,9 @@ async def webhook(request: Request):
     
     # We pass the whole payload so handle_message can see the image data
     if text or image_data:
+        # We ensure handle_message always returns a string
         reply = handle_message(phone, text, payload)
-        send_whatsapp_message(phone, reply)
+        if reply:
+            send_whatsapp_message(phone, reply)
 
     return JSONResponse({"status": "processed"})
