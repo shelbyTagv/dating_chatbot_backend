@@ -178,25 +178,51 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
     user = db_manager.get_user_by_phone(phone)
     if not user: user = db_manager.create_new_user(phone)
     uid = user["id"]
+
+    # --- PROFILE COMMAND ---
+    if msg_l == "profile":
+        user_p = db_manager.get_user_by_phone(phone) # Fetch full details
+        if not user_p.get("name"):
+            return "❌ You haven't completed your profile yet! Type *HELLO* to start."
+        
+        caption = (f"👤 *YOUR PROFILE*\n"
+                   f"━━━━━━━━━━━━━━━\n"
+                   f"📝 *Name:* {user_p.get('name')}\n"
+                   f"🎂 *Age:* {user_p.get('age')}\n"
+                   f"📍 *Location:* {user_p.get('location')}\n"
+                   f"💖 *Looking for:* {user_p.get('intent')}\n"
+                   f"📞 *Contact:* {user_p.get('contact_phone')}")
+        
+        if user_p.get('picture'):
+            send_whatsapp_image(phone, user_p['picture'], caption)
+        else:
+            send_whatsapp_message(phone, caption)
+        return "You can type *EXIT* to restart your profile if you want to change something."
+
+
+
     db_manager.ensure_profile(uid)
     state = user.get("chat_state")
     if not state:
         state = "NEW"
         db_manager.set_state(uid, "NEW")
 
+
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
     if state == "NEW":
-        # Check if the user is saying a valid greeting
-        if msg_l in ["hello", "hi", "hey"]:
-            # ONLY reset the profile if they explicitly start over with a greeting
+        # Check if the user is saying a valid greeting to start registration
+        if msg_l in ["hello", "hi", "hey", "hie"]:
             db_manager.reset_profile(uid)
             db_manager.set_state(uid, "GET_GENDER")
-            return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered. Sending pictures is mandatory you can skip sending picture by typing skip\n\nPlease select your gender:\n• MALE\n• FEMALE"
+            return ("👋 Welcome to Shelby Dating Connections!\n\n"
+                    "Looking for Love, or just vibes: we got you covered. "
+                    "Sending pictures is mandatory (you can skip by typing 'skip').\n\n"
+                    "Please select your gender:\n• MALE\n• FEMALE")
         else:
-            # If they send anything else, do NOT reset and just guide them
-            return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered. Sending pictures is mandatory you can skip sending picture by typing skip\n\nPlease select your gender:\n• MALE\n• FEMALE"
-
+            # If they are NEW and send something else, just prompt them to start
+            return "👋 Welcome! Please type *HELLO* or *HI* to start finding matches."
+    
     if state == "GET_GENDER":
         if msg_l not in ["male", "female"]: 
             return "❗ Please type MALE or FEMALE here."
@@ -279,6 +305,11 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         return "Almost done! Please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
+        if msg_l == "skip":
+            db_manager.update_profile(uid, "picture", None)
+            db_manager.set_state(uid, "GET_PHONE")
+            return "⏩ Photo skipped. 📞 Now, enter the phone number where matches can contact you:"
+
         msg_data = payload.get("messageData", {})
         file_data = msg_data.get("fileMessageData", {})
         image_data = msg_data.get("imageMessageData", {})
