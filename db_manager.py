@@ -32,16 +32,9 @@ def init_db():
     c = conn()
     cur = c.cursor()
 
-    # Disable foreign key checks to drop tables safely
-    cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-    cur.execute("DROP TABLE IF EXISTS payments")
-    cur.execute("DROP TABLE IF EXISTS profiles")
-    cur.execute("DROP TABLE IF EXISTS users")
-    cur.execute("SET FOREIGN_KEY_CHECKS = 1")
-
-    # 1. Users Table
+    # 1. Users Table (No drop, only create if missing)
     cur.execute("""
-        CREATE TABLE users (
+        CREATE TABLE IF NOT EXISTS users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone VARCHAR(20) UNIQUE,
             chat_state VARCHAR(32) DEFAULT 'NEW',
@@ -50,9 +43,9 @@ def init_db():
         )
     """)
 
-    # 2. Profiles Table (Corrected with Picture, minimal columns)
+    # 2. Profiles Table (Corrected with Picture)
     cur.execute("""
-        CREATE TABLE profiles (
+        CREATE TABLE IF NOT EXISTS profiles (
             user_id INT PRIMARY KEY,
             gender VARCHAR(10),
             name VARCHAR(100),
@@ -70,7 +63,7 @@ def init_db():
 
     # 3. Payments Table
     cur.execute("""
-        CREATE TABLE payments (
+        CREATE TABLE IF NOT EXISTS payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT,
             reference VARCHAR(50) UNIQUE,
@@ -85,7 +78,7 @@ def init_db():
     c.commit()
     cur.close()
     c.close()
-    print("✅ Database Reset: Tables dropped and recreated with new schema.")
+    print("✅ Database connection verified. Tables checked/created.")
 
 # -------------------------------------------------
 # MATCHING LOGIC
