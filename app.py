@@ -164,7 +164,7 @@ def handle_message(phone: str, text: str) -> str:
             return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered\n\nPlease select your gender:\n• MALE\n• FEMALE"
         else:
             # If they send anything else, do NOT reset and just guide them
-            return "👋 Welcome back! Please type *HELLO* or *HI* to start finding matches."
+            return "👋 Welcome! Please type *HELLO* or *HI* to start finding matches."
 
     if state == "GET_GENDER":
         if msg_l not in ["male", "female"]: 
