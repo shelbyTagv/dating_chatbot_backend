@@ -158,7 +158,6 @@ def send_whatsapp_image(phone: str, file_id: str, caption: str):
 # -------------------------------------------------
 
 def handle_message(phone: str, text: str, payload: dict) -> str:
-    print(f"DEBUG: Processing message from {phone}. State: {db_manager.get_user_by_phone(phone)['chat_state']}")
     msg = text.strip() if text else ""
     msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
