@@ -307,17 +307,17 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         
     if state == "GET_LOCATION":
-        # Basic validation: Check if they provided at least two words
-        parts = msg.replace(",", " ").split()
+        location_input = msg.strip().title()
+        parts = location_input.replace(",", " ").split()
         
         if len(parts) < 2:
             return ("⚠️ *Please be more specific.*\n\n"
-                    "To find the best matches near you, we need your **City and Suburb** (e.g., Harare CBD, or Harare Westgate).")
+                    "We need your **City and Suburb** to find matches near you (e.g., Harare CBD or Harare Ruwa).")
 
-        # If it passes, save and move on
+
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHOTO")
-        return "✅ Location saved! Now, please send a clear photo of yourself."
+        return "Almost done! Please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
         if msg_l == "skip":
