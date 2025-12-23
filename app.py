@@ -145,9 +145,8 @@ FEMALE_OPTIONS = ["2", "3","5" "6", "7", "8"]
 
 
 def send_whatsapp_image(phone: str, image_path: str, caption: str):
-    # Check if the path is a URL or a fileId
+    # Check if the path is a URL from Green API
     if image_path.startswith("http"):
-        # Use sendFileByUrl
         url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUrl/{API_TOKEN_INSTANCE}"
         payload = {
             "chatId": f"{phone}@c.us",
@@ -156,7 +155,7 @@ def send_whatsapp_image(phone: str, image_path: str, caption: str):
             "caption": caption
         }
     else:
-        # Fallback to sendFileByUpload (for fileIds)
+        # Fallback for local files or fileIds
         url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUpload/{API_TOKEN_INSTANCE}"
         payload = {
             "chatId": f"{phone}@c.us",
@@ -185,6 +184,38 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         state = "NEW"
         db_manager.set_state(uid, "NEW")
 
+    if msg_l == "skip":
+        db_manager.set_state(uid, "GET_PHONE")
+        return "⏩ Skipped! Now, enter your contact phone number:"
+
+
+    # Trigger for viewing profile
+    if msg_l == "profile":
+        user_data = db_manager.get_user_by_phone(phone)
+        if user_data:
+            # Construct a nice summary message
+            profile_text = (
+                f"👤 *YOUR PROFILE*\n"
+                f"━━━━━━━━━━━━━━━\n"
+                f"📝 *Name:* {user_data.get('name', 'N/A')}\n"
+                f"🎂 *Age:* {user_data.get('age', 'N/A')}\n"
+                f"📍 *Location:* {user_data.get('location', 'N/A')}\n"
+                f"💖 *Looking for:* {user_data.get('looking_for', 'N/A')}\n"
+                f"📞 *Contact:* {user_data.get('contact_phone', 'N/A')}"
+            )
+            
+            # Send the text first
+            send_whatsapp_message(phone, profile_text)
+            
+            # Send the photo if it exists
+            photo_path = user_data.get("picture")
+            if photo_path:
+                send_whatsapp_image(phone, photo_path, "This is your current profile photo.")
+            
+            return "👆 There is your current profile! Type *EDIT* if you want to restart (Coming soon)."
+        else:
+            return "❌ I couldn't find your profile. Type *HELLO* to register."
+
 
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
@@ -194,10 +225,10 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             # ONLY reset the profile if they explicitly start over with a greeting
             db_manager.reset_profile(uid)
             db_manager.set_state(uid, "GET_GENDER")
-            return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered\n\nPlease select your gender:\n• MALE\n• FEMALE"
+            return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered\nSending pictures is mandatory you can skip sending picture by typing skip\n\nPlease select your gender:\n• MALE\n• FEMALE"
         else:
             # If they send anything else, do NOT reset and just guide them
-            return "👋 Welcome! Please type *HELLO* or *HI* to start finding matches."
+            return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered\nSending pictures is mandatory you can skip sending picture by typing skip\n\nPlease select your gender:\n• MALE\n• FEMALE"
 
     if state == "GET_GENDER":
         if msg_l not in ["male", "female"]: 
@@ -278,7 +309,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
     if state == "GET_LOCATION":
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHOTO")
-        return "📸 Almost done! Please send a clear photo of yourself."
+        return "Almost done! Please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
         msg_data = payload.get("messageData", {})
@@ -299,7 +330,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             return "✅ Photo received! 📞 Finally, enter the phone number where matches can contact you (e.g., 0772111222):"
         
         # If we reach here, it means no link was found
-        return "📸 I saw your message, but I couldn't process the photo. Please try sending it again as a standard gallery image."
+        return "I saw your message, but I couldn't process the photo. Please try sending it again as a standard gallery image."
     
 
     # Insert this block before the other state checks in handle_message
