@@ -198,7 +198,8 @@ def get_user_by_phone(phone):
 def create_new_user(phone):
     c = conn()
     cur = c.cursor()
-    cur.execute("INSERT INTO users (phone) VALUES (%s)", (phone,))
+    # Explicitly setting chat_state to 'NEW' on creation
+    cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s, 'NEW')", (phone,))
     c.commit()
     cur.close()
     c.close()

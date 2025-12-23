@@ -204,6 +204,7 @@ def handle_message(phone: str, text: str) -> str:
         db_manager.update_profile(uid, "intent", intent)
         db_manager.set_state(uid, "GET_AGE_RANGE")
         return "🎂 Preferred age range:\n1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
+    
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r: return "❗ Choose 1–6."
@@ -244,24 +245,28 @@ def handle_message(phone: str, text: str) -> str:
         return "📞 Enter your the Contact where you can be contacted:"
     
 
+    # Insert this block before the other state checks in handle_message
     if state == "AWAITING_MATCHES":
         if msg_l == "status":
             matches = db_manager.get_matches(uid)
             if matches:
                 db_manager.set_state(uid, "CHOOSE_CURRENCY")
                 reply = "🔥 *Matches Found!* 🔥\n"
-                for m in matches: reply += f"• {m['name']} — {m['location']}\n"
+                for m in matches: 
+                    reply += f"• {m['name']} — {m['location']}\n"
                 reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
                 return reply
-            return "⏳ Still no matches yet. We will notify you! (Or type *HELLO* to redo your profile)"
-        
-        # If they type "Hello" here, it will fall through to the global greeting check
-        if msg_l in ["hello", "hi"]:
+            else:
+                return ("⏳ Still looking for matches that fit your profile...\n\n"
+                        "Check back later by typing *STATUS*.\n"
+                        "Or type *EXIT* to restart and change your profile details.")
+
+        if msg_l == "exit":
             db_manager.reset_profile(uid)
             db_manager.set_state(uid, "GET_GENDER")
-            return "👋 Let's restart your profile!\n\nPlease select your gender:\n• MALE\n• FEMALE"
+            return "👋 Profile cleared. Let's start over!\n\nPlease select your gender:\n• MALE\n• FEMALE"
 
-        return "Type *STATUS* to check for matches or *HELLO* to start over."
+        return "🔍 You are currently waiting for matches. Type *STATUS* to check again or *EXIT* to redo your profile."
 
     if state == "GET_PHONE":
         clean_num = msg.strip().replace(" ", "").replace("+263", "0")
