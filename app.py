@@ -161,7 +161,7 @@ def handle_message(phone: str, text: str) -> str:
             # ONLY reset the profile if they explicitly start over with a greeting
             db_manager.reset_profile(uid)
             db_manager.set_state(uid, "GET_GENDER")
-            return "👋 Welcome to Shelby Dating Connections!\n\nPlease select your gender:\n• MALE\n• FEMALE"
+            return "👋 Welcome to Shelby Dating Connections! Looking for Love, or just vibes: we got you covered\n\nPlease select your gender:\n• MALE\n• FEMALE"
         else:
             # If they send anything else, do NOT reset and just guide them
             return "👋 Welcome back! Please type *HELLO* or *HI* to start finding matches."
@@ -346,7 +346,7 @@ def handle_message(phone: str, text: str) -> str:
 
     # This is the final fallback for any unrecognized message or state
     db_manager.set_state(uid, "NEW")
-    return "❗ Chat ended: Please type *HELLO* or *HI* to start finding matches."
+    return "❗ Chat ended:Please type *HELLO* or *HI* to start finding matches."
 
 
 
