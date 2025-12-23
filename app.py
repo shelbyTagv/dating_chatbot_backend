@@ -298,13 +298,26 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             
         db_manager.update_profile(uid, "age", age)
         db_manager.set_state(uid, "GET_LOCATION")
-        return "📍 Where are you located?"
+        return ("📍 *Where are you located?*\n\n"
+                "Please enter your **City and Area**.\n"
+                "Examples:\n"
+                "• Harare, Budiriro\n"
+                "• Bulawayo, Nkulumane\n"
+                "• Mutare, Sakubva")
         
         
     if state == "GET_LOCATION":
+        # Basic validation: Check if they provided at least two words
+        parts = msg.replace(",", " ").split()
+        
+        if len(parts) < 2:
+            return ("⚠️ *Please be more specific.*\n\n"
+                    "To find the best matches near you, we need your **City and Suburb** (e.g., Harare CBD, or Harare Westgate).")
+
+        # If it passes, save and move on
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHOTO")
-        return "Almost done! Please send a clear photo of yourself."
+        return "✅ Location saved! Now, please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
         if msg_l == "skip":
