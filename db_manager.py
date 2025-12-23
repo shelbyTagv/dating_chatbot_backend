@@ -2,38 +2,9 @@ from dotenv import load_dotenv
 load_dotenv()
 
 import os
-import json
 import random
 import mysql.connector.pooling
 from datetime import datetime
-from math import radians, cos, sin, asin, sqrt
-from openai import OpenAI
-
-# -------------------------------------------------
-# CONSTANTS & CONFIG
-# -------------------------------------------------
-# Define exactly who is compatible with whom
-# This follows your specific rules: Benten -> Sugar Mummy, etc.
-DIRECT_MATCH_MAP = {
-    "boyfriend": ["girlfriend", "sugar mummy"],
-    "girlfriend": ["boyfriend", "sugar daddy"],
-    "sugar mummy": ["boyfriend", "benten"],
-    "sugar daddy": ["girlfriend", "sugar baby"],
-    "benten": ["sugar mummy"],
-    "sugar baby": ["sugar daddy"],
-    # Casual/Social match with themselves
-    "1 night stand": ["1 night stand"],
-    "just vibes": ["just vibes"],
-    "friend": ["friend"]
-}
-
-# These are the categories you defined
-SERIOUS_INTENTS = ["boyfriend", "girlfriend", "sugar mummy", "sugar daddy", "benten", "sugar baby"]
-CASUAL_INTENTS = ["1 night stand", "just vibes", "friend"]
-
-
-
-client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
 # -------------------------------------------------
 # DB CONNECTION POOL
@@ -55,41 +26,33 @@ def conn():
     return _pool.get_connection()
 
 # -------------------------------------------------
-# COLUMN CHECK HELPER
-# -------------------------------------------------
-def column_exists(cursor, table, column):
-    cursor.execute("""
-        SELECT COUNT(*)
-        FROM INFORMATION_SCHEMA.COLUMNS
-        WHERE TABLE_SCHEMA = DATABASE()
-          AND TABLE_NAME = %s
-          AND COLUMN_NAME = %s
-    """, (table, column))
-    return cursor.fetchone()[0] > 0
-
-# -------------------------------------------------
-# INIT + AUTO-MIGRATION
+# INIT (Drops and Creates)
 # -------------------------------------------------
 def init_db():
     c = conn()
     cur = c.cursor()
 
-    # Users Table
+    # Disable foreign key checks to drop tables safely
+    cur.execute("SET FOREIGN_KEY_CHECKS = 0")
+    cur.execute("DROP TABLE IF EXISTS payments")
+    cur.execute("DROP TABLE IF EXISTS profiles")
+    cur.execute("DROP TABLE IF EXISTS users")
+    cur.execute("SET FOREIGN_KEY_CHECKS = 1")
+
+    # 1. Users Table
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS users (
+        CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone VARCHAR(20) UNIQUE,
             chat_state VARCHAR(32) DEFAULT 'NEW',
-            is_paid TINYINT DEFAULT 0
+            is_paid TINYINT DEFAULT 0,
+            paid_at DATETIME
         )
     """)
 
-    if not column_exists(cur, "users", "paid_at"):
-        cur.execute("ALTER TABLE users ADD paid_at DATETIME")
-
-    # Profiles Table
+    # 2. Profiles Table (Corrected with Picture, minimal columns)
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS profiles (
+        CREATE TABLE profiles (
             user_id INT PRIMARY KEY,
             gender VARCHAR(10),
             name VARCHAR(100),
@@ -100,91 +63,67 @@ def init_db():
             age_min INT,
             age_max INT,
             contact_phone VARCHAR(20),
+            picture TEXT,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
 
-    profile_columns = {
-        "bio": "TEXT",
-        "hobbies": "TEXT",
-        "personality_traits": "TEXT",
-        "latitude": "DECIMAL(9,6)",
-        "longitude": "DECIMAL(9,6)",
-        "temp_contact_phone": "VARCHAR(20)"
-    }
-
-    for col, col_type in profile_columns.items():
-        if not column_exists(cur, "profiles", col):
-            cur.execute(f"ALTER TABLE profiles ADD {col} {col_type}")
-
-    # Payments Table
+    # 3. Payments Table
     cur.execute("""
-        CREATE TABLE IF NOT EXISTS payments (
+        CREATE TABLE payments (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT,
             reference VARCHAR(50) UNIQUE,
             poll_url TEXT,
             paid TINYINT DEFAULT 0,
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
+            paid_at DATETIME,
             FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
         )
     """)
 
-    if not column_exists(cur, "payments", "paid_at"):
-        cur.execute("ALTER TABLE payments ADD paid_at DATETIME")
-
     c.commit()
     cur.close()
     c.close()
+    print("✅ Database Reset: Tables dropped and recreated with new schema.")
 
 # -------------------------------------------------
-# PAYMENTS
+# MATCHING LOGIC
 # -------------------------------------------------
-def create_payment(uid, reference, poll_url):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        INSERT INTO payments (user_id, reference, poll_url)
-        VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE poll_url=%s
-    """, (uid, reference, poll_url, poll_url))
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_pending_payments():
+def get_matches(user_id):
     c = conn()
     cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM payments WHERE paid = 0")
-    rows = cur.fetchall()
-    cur.close()
-    c.close()
-    return rows
 
-def mark_payment_paid(reference):
-    c = conn()
-    cur = c.cursor()
-    # Check by reference since it's the primary identifier from PesePay
-    cur.execute("UPDATE payments SET paid = 1, paid_at = %s WHERE reference = %s",
-                (datetime.utcnow(), reference))
-    c.commit()
-    cur.close()
-    c.close()
+    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
+    user = cur.fetchone()
+    if not user:
+        return []
 
-def update_payment_poll(uid, reference, poll_url):
-    c = conn()
-    cur = c.cursor()
+    # Basic matching: Heterosexual, within age range, matching intent
     cur.execute("""
-        INSERT INTO payments (user_id, reference, poll_url)
-        VALUES (%s, %s, %s)
-        ON DUPLICATE KEY UPDATE poll_url=%s
-    """, (uid, reference, poll_url, poll_url))
-    c.commit()
+        SELECT * FROM profiles 
+        WHERE user_id != %s 
+        AND gender = %s 
+        AND age BETWEEN %s AND %s
+    """, (user_id, user['preferred_gender'], user['age_min'], user['age_max']))
+    
+    candidates = cur.fetchall()
     cur.close()
     c.close()
+
+    # Filter by intent and mutual age preference
+    valid_matches = []
+    for cand in candidates:
+        # Check if user fits in candidate's age range
+        if cand['age_min'] <= user['age'] <= cand['age_max']:
+            valid_matches.append(cand)
+
+    if valid_matches:
+        return random.sample(valid_matches, min(2, len(valid_matches)))
+    return []
 
 # -------------------------------------------------
-# USER MANAGEMENT
+# USER & PROFILE HELPERS
 # -------------------------------------------------
 def get_user_by_phone(phone):
     c = conn()
@@ -198,7 +137,6 @@ def get_user_by_phone(phone):
 def create_new_user(phone):
     c = conn()
     cur = c.cursor()
-    # Explicitly setting chat_state to 'NEW' on creation
     cur.execute("INSERT INTO users (phone, chat_state) VALUES (%s, 'NEW')", (phone,))
     c.commit()
     cur.close()
@@ -213,43 +151,6 @@ def set_state(uid, state):
     cur.close()
     c.close()
 
-def activate_user(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE users SET is_paid=1, paid_at=%s, chat_state='PAID' WHERE id=%s",
-                (datetime.utcnow(), uid))
-    c.commit()
-    cur.close()
-    c.close()
-
-def get_user_phone(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
-    row = cur.fetchone()
-    cur.close()
-    c.close()
-    return row[0] if row else None
-
-
-def reset_user_payment(uid):
-    c=conn()
-    try:
-        cur = c.cursor()
-        # Updating the 'users' table specifically
-        query = "UPDATE users SET is_paid = 0 WHERE id = %s"
-        cur.execute(query, (uid,))
-        c.commit()
-        print(f"DEBUG: Payment status reset for User ID {uid}")
-    except Exception as e:
-        print(f"Error resetting payment for User {uid}: {e}")
-    finally:
-        cur.close()
-        c.close()
-
-# -------------------------------------------------
-# PROFILE MANAGEMENT
-# -------------------------------------------------
 def ensure_profile(uid):
     c = conn()
     cur = c.cursor()
@@ -263,20 +164,81 @@ def ensure_profile(uid):
 def update_profile(uid, field, value):
     c = conn()
     cur = c.cursor()
-    cur.execute(f"UPDATE profiles SET {field}=%s WHERE user_id=%s", (value, uid))
+    query = f"UPDATE profiles SET {field}=%s WHERE user_id=%s"
+    cur.execute(query, (value, uid))
     c.commit()
     cur.close()
     c.close()
 
-def get_user_gender(uid):
+def reset_profile(uid):
     c = conn()
     cur = c.cursor()
-    cur.execute("SELECT gender FROM profiles WHERE user_id=%s", (uid,))
+    cur.execute("""
+        UPDATE profiles SET
+            gender=NULL, name=NULL, age=NULL, location=NULL, intent=NULL,
+            preferred_gender=NULL, age_min=NULL, age_max=NULL, 
+            contact_phone=NULL, picture=NULL
+        WHERE user_id = %s
+    """, (uid,))
+    c.commit()
+    cur.close()
+    c.close()
+
+# -------------------------------------------------
+# PAYMENT HELPERS
+# -------------------------------------------------
+def create_payment(uid, reference, poll_url):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("INSERT INTO payments (user_id, reference, poll_url) VALUES (%s, %s, %s)", 
+                (uid, reference, poll_url))
+    c.commit()
+    cur.close()
+    c.close()
+
+def mark_payment_paid(reference):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("UPDATE payments SET paid = 1, paid_at = %s WHERE reference = %s",
+                (datetime.utcnow(), reference))
+    c.commit()
+    cur.close()
+    c.close()
+
+def activate_user(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_paid=1, paid_at=%s WHERE id=%s",
+                (datetime.utcnow(), uid))
+    c.commit()
+    cur.close()
+    c.close()
+
+def reset_user_payment(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("UPDATE users SET is_paid = 0 WHERE id = %s", (uid,))
+    c.commit()
+    cur.close()
+    c.close()
+
+def get_pending_payments():
+    c = conn()
+    cur = c.cursor(dictionary=True)
+    cur.execute("SELECT * FROM payments WHERE paid = 0")
+    rows = cur.fetchall()
+    cur.close()
+    c.close()
+    return rows
+
+def get_user_phone(uid):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("SELECT phone FROM users WHERE id=%s", (uid,))
     row = cur.fetchone()
     cur.close()
     c.close()
     return row[0] if row else None
-
 
 def get_profile_name(uid):
     c = conn()
@@ -287,86 +249,11 @@ def get_profile_name(uid):
     c.close()
     return row[0] if row and row[0] else "Customer"
 
-def reset_profile(uid):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        UPDATE profiles SET
-            gender = NULL, name = NULL, age = NULL, location = NULL,
-            intent = NULL, preferred_gender = NULL, age_min = NULL,
-            age_max = NULL, contact_phone = NULL, temp_contact_phone = NULL,
-            bio = NULL, hobbies = NULL, personality_traits = NULL,
-            latitude = NULL, longitude = NULL
-        WHERE user_id = %s
-    """, (uid,))
-    c.commit()
-    cur.close()
-    c.close()
-
-# -------------------------------------------------
-# MATCHING LOGIC
-# -------------------------------------------------
-def get_matches(user_id):
+def get_pending_payments_for_user(uid):
     c = conn()
     cur = c.cursor(dictionary=True)
-
-    cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
-    user = cur.fetchone()
-    if not user:
-        return []
-
-    cur.execute("SELECT * FROM profiles WHERE user_id != %s", (user_id,))
-    candidates = cur.fetchall()
+    cur.execute("SELECT * FROM payments WHERE user_id=%s AND paid=0 ORDER BY created_at DESC", (uid,))
+    rows = cur.fetchall()
     cur.close()
     c.close()
-
-    matches = []
-    for cand in candidates:
-        if gender_match(user, cand) and age_match(user, cand) and intent_match(user, cand):
-            matches.append(cand)
-
-    if matches:
-        matches = random.sample(matches, min(2, len(matches)))
-
-    return matches
-
-def gender_match(user, cand):
-    u_g = user.get("gender")
-    c_g = cand.get("gender")
-    if not u_g or not c_g: return False
-    return u_g != c_g  # Basic heterosexual logic
-
-def age_match(user, cand):
-    try:
-        return (user["age_min"] <= cand["age"] <= user["age_max"] and
-                cand["age_min"] <= user["age"] <= cand["age_max"])
-    except: return False
-
-def intent_match(user, cand):
-    u_intent = user.get("intent")
-    c_intent = cand.get("intent")
-
-    if not u_intent or not c_intent:
-        return False
-
-    # Logic for Serious/Sugar categories (Direct Mapping)
-    if u_intent in DIRECT_MATCH_MAP:
-        return c_intent in DIRECT_MATCH_MAP[u_intent]
-    
-    # Logic for Casual categories (Match with same intent)
-    # If I want 'vibes', you must also want 'vibes'
-    if u_intent in CASUAL_INTENTS:
-        return u_intent == c_intent
-
-    return False
-
-
-# -------------------------------------------------
-# GEOLOCATION (OPTIONAL)
-# -------------------------------------------------
-def compute_distance(lat1, lon1, lat2, lon2):
-    if None in (lat1, lon1, lat2, lon2): return None
-    R = 6371
-    dlat, dlon = radians(lat2 - lat1), radians(lon2 - lon1)
-    a = sin(dlat/2)**2 + cos(radians(lat1))*cos(radians(lat2))*sin(dlon/2)**2
-    return R * (2 * asin(sqrt(a)))
+    return rows

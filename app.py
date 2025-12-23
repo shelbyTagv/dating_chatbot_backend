@@ -57,14 +57,20 @@ def process_successful_payment(uid, reference):
     phone = db_manager.get_user_phone(uid)
     matches = db_manager.get_matches(uid)
     
-    msg = "✅ *Payment Successful!*\n\n📞 Here are your matches:\n\n"
-    for m in matches:
-        msg += f"• {m['name']}: {m['contact_phone']}\n"
-    
-    send_whatsapp_message(phone, msg)
+    send_whatsapp_message(phone, "✅ *Payment Successful!* Here are your matches:")
 
-    # 2. RESET logic: Update is_paid back to 0 so they pay next time
-    db_manager.reset_user_payment(uid) # You will need to add this function to db_manager.py
+    for m in matches:
+        caption = (f"👤 *Name:* {m['name']}\n"
+                   f"🎂 *Age:* {m['age']}\n"
+                   f"📍 *Location:* {m['location']}\n"
+                   f"📞 *Contact:* {m['contact_phone']}")
+        
+        if m.get('picture'):
+            send_whatsapp_image(phone, m['picture'], caption)
+        else:
+            send_whatsapp_message(phone, caption)
+    
+    db_manager.reset_user_payment(uid)
     db_manager.set_state(uid, "NEW")
 
 # -------------------------------------------------
@@ -137,12 +143,23 @@ MALE_OPTIONS = ["1", "4", "6", "7", "8"]
 # Allowed options for FEMALE users
 FEMALE_OPTIONS = ["2", "3","5" "6", "7", "8"]
 
+
+def send_whatsapp_image(phone: str, file_id: str, caption: str):
+    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUpload/{API_TOKEN_INSTANCE}"
+    payload = {
+        "chatId": f"{phone}@c.us",
+        "fileId": file_id,
+        "caption": caption
+    }
+    requests.post(url, json=payload, timeout=10)
+
 # -------------------------------------------------
 # CHAT HANDLER
 # -------------------------------------------------
 
-def handle_message(phone: str, text: str) -> str:
-    msg = text.strip(); msg_l = msg.lower()
+def handle_message(phone: str, text: str, payload: dict) -> str:
+    msg = text.strip() if text else ""
+    msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
     if not user: user = db_manager.create_new_user(phone)
     uid = user["id"]
@@ -244,8 +261,19 @@ def handle_message(phone: str, text: str) -> str:
         
     if state == "GET_LOCATION":
         db_manager.update_profile(uid, "location", msg)
+        db_manager.set_state(uid, "GET_PHOTO")
+        return "📸 Almost done! Please send a clear photo of yourself."
+    
+    if state == "GET_PHOTO":
+        # Check if the message contains an image (passed from webhook)
+        photo_id = payload.get("messageData", {}).get("imageMessageData", {}).get("fileId")
+        
+        if not photo_id:
+            return "❗ Please send an actual image file so matches can see who you are."
+
+        db_manager.update_profile(uid, "picture", photo_id)
         db_manager.set_state(uid, "GET_PHONE")
-        return "📞 Enter your the Contact where you can be contacted:"
+        return "📞 Finally, enter the phone number where you can be contacted:"
     
 
     # Insert this block before the other state checks in handle_message
@@ -360,16 +388,27 @@ async def webhook(request: Request):
         raise HTTPException(status_code=401)
 
     payload = await request.json()
+    
+    # We only care about incoming messages
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
-    phone = payload["senderData"]["chatId"].split("@")[0]
+    sender_data = payload.get("senderData", {})
+    phone = sender_data.get("chatId", "").split("@")[0]
+    
     msg_data = payload.get("messageData", {})
+    
+    # 1. Extract Text (Regular or Extended)
     text = msg_data.get("textMessageData", {}).get("textMessage", "") or \
            msg_data.get("extendedTextMessageData", {}).get("text", "")
 
-    if text:
-        reply = handle_message(phone, text)
+    # 2. Extract Photo (If sent)
+    # Green API provides image details under imageMessageData
+    image_data = msg_data.get("imageMessageData")
+    
+    # We pass the whole payload so handle_message can see the image data
+    if text or image_data:
+        reply = handle_message(phone, text, payload)
         send_whatsapp_message(phone, reply)
 
     return JSONResponse({"status": "processed"})
