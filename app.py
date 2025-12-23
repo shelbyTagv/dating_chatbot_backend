@@ -266,19 +266,23 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         return "📸 Almost done! Please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
-        # 1. Look for the image in the payload
+        # Check all possible locations for the fileId
         msg_data = payload.get("messageData", {})
-        image_data = msg_data.get("imageMessageData", {})
-        file_id = image_data.get("fileId")
+        
+        # Method A: Standard imageMessageData
+        file_id = msg_data.get("imageMessageData", {}).get("fileId")
+        
+        # Method B: fileMessageData (fallback)
+        if not file_id:
+            file_id = msg_data.get("fileMessageData", {}).get("fileId")
 
         if file_id:
-            # Success: Save and move to next state
             db_manager.update_profile(uid, "picture", file_id)
             db_manager.set_state(uid, "GET_PHONE")
             return "✅ Photo received! 📞 Finally, enter the phone number where matches can contact you (e.g., 0772111222):"
         
-        # 2. If they sent text instead of a photo
-        return "❗ Please send an actual **Photo** (as an attachment) so your matches can see you."
+        # If they sent text but no image
+        return "📸 I didn't see a photo. Please click the '+' or 'Paperclip' icon and send a clear photo of yourself."
     
 
     # Insert this block before the other state checks in handle_message
@@ -394,26 +398,24 @@ async def webhook(request: Request):
 
     payload = await request.json()
     
-    # We only care about incoming messages
+    # Debug: This will print the raw data to your terminal so you can see if the photo arrives
+    print(f"RAW PAYLOAD: {payload}")
+
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
-    sender_data = payload.get("senderData", {})
-    phone = sender_data.get("chatId", "").split("@")[0]
-    
+    phone = payload.get("senderData", {}).get("chatId", "").split("@")[0]
     msg_data = payload.get("messageData", {})
     
-    # 1. Extract Text (Regular or Extended)
+    # 1. Capture Text
     text = msg_data.get("textMessageData", {}).get("textMessage", "") or \
            msg_data.get("extendedTextMessageData", {}).get("text", "")
 
-    # 2. Extract Photo (If sent)
-    # Green API provides image details under imageMessageData
-    image_data = msg_data.get("imageMessageData")
+    # 2. Capture Photo (Green API often uses 'fileMessageData' for images)
+    image_info = msg_data.get("imageMessageData") or msg_data.get("fileMessageData")
     
-    # We pass the whole payload so handle_message can see the image data
-    if text or image_data:
-        # We ensure handle_message always returns a string
+    # If there is text OR an image, process it
+    if text or image_info:
         reply = handle_message(phone, text, payload)
         if reply:
             send_whatsapp_message(phone, reply)
