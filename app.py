@@ -144,14 +144,30 @@ MALE_OPTIONS = ["1", "4", "6", "7", "8"]
 FEMALE_OPTIONS = ["2", "3","5" "6", "7", "8"]
 
 
-def send_whatsapp_image(phone: str, file_id: str, caption: str):
-    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUpload/{API_TOKEN_INSTANCE}"
-    payload = {
-        "chatId": f"{phone}@c.us",
-        "fileId": file_id,
-        "caption": caption
-    }
-    requests.post(url, json=payload, timeout=10)
+def send_whatsapp_image(phone: str, image_path: str, caption: str):
+    # Check if the path is a URL or a fileId
+    if image_path.startswith("http"):
+        # Use sendFileByUrl
+        url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUrl/{API_TOKEN_INSTANCE}"
+        payload = {
+            "chatId": f"{phone}@c.us",
+            "urlFile": image_path,
+            "fileName": "profile_picture.jpg",
+            "caption": caption
+        }
+    else:
+        # Fallback to sendFileByUpload (for fileIds)
+        url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUpload/{API_TOKEN_INSTANCE}"
+        payload = {
+            "chatId": f"{phone}@c.us",
+            "fileId": image_path,
+            "caption": caption
+        }
+    
+    try:
+        requests.post(url, json=payload, timeout=15)
+    except Exception as e:
+        print(f"Error sending image: {e}")
 
 # -------------------------------------------------
 # CHAT HANDLER
@@ -266,25 +282,24 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
     
     if state == "GET_PHOTO":
         msg_data = payload.get("messageData", {})
+        file_data = msg_data.get("fileMessageData", {})
+        image_data = msg_data.get("imageMessageData", {})
         
-        # 1. Try Image Message (Standard)
-        file_id = msg_data.get("imageMessageData", {}).get("fileId")
-        
-        # 2. Try File Message (If sent as a document)
-        if not file_id:
-            file_id = msg_data.get("fileMessageData", {}).get("fileId")
-            
-        # 3. Try Document Message (Alternative)
-        if not file_id:
-            file_id = msg_data.get("documentMessageData", {}).get("fileId")
+        # 1. Try to get the ID or the URL (Green API sometimes sends one or the other)
+        # Based on your logs, your instance is sending 'downloadUrl' inside 'fileMessageData'
+        photo_link = (
+            image_data.get("fileId") or 
+            file_data.get("downloadUrl") or 
+            image_data.get("downloadUrl")
+        )
 
-        if file_id:
-            db_manager.update_profile(uid, "picture", file_id)
+        if photo_link:
+            db_manager.update_profile(uid, "picture", photo_link)
             db_manager.set_state(uid, "GET_PHONE")
             return "✅ Photo received! 📞 Finally, enter the phone number where matches can contact you (e.g., 0772111222):"
         
-        # If we reach here, it means they sent text but no file was detected
-        return "📸 I saw your message, but there was no photo attached. Please send your photo as an **Image attachment**."
+        # If we reach here, it means no link was found
+        return "📸 I saw your message, but I couldn't process the photo. Please try sending it again as a standard gallery image."
     
 
     # Insert this block before the other state checks in handle_message
