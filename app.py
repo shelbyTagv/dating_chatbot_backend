@@ -266,23 +266,26 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         return "📸 Almost done! Please send a clear photo of yourself."
     
     if state == "GET_PHOTO":
-        # Check all possible locations for the fileId
         msg_data = payload.get("messageData", {})
         
-        # Method A: Standard imageMessageData
+        # 1. Try Image Message (Standard)
         file_id = msg_data.get("imageMessageData", {}).get("fileId")
         
-        # Method B: fileMessageData (fallback)
+        # 2. Try File Message (If sent as a document)
         if not file_id:
             file_id = msg_data.get("fileMessageData", {}).get("fileId")
+            
+        # 3. Try Document Message (Alternative)
+        if not file_id:
+            file_id = msg_data.get("documentMessageData", {}).get("fileId")
 
         if file_id:
             db_manager.update_profile(uid, "picture", file_id)
             db_manager.set_state(uid, "GET_PHONE")
             return "✅ Photo received! 📞 Finally, enter the phone number where matches can contact you (e.g., 0772111222):"
         
-        # If they sent text but no image
-        return "📸 I didn't see a photo. Please click the '+' or 'Paperclip' icon and send a clear photo of yourself."
+        # If we reach here, it means they sent text but no file was detected
+        return "📸 I saw your message, but there was no photo attached. Please send your photo as an **Image attachment**."
     
 
     # Insert this block before the other state checks in handle_message
@@ -412,7 +415,11 @@ async def webhook(request: Request):
            msg_data.get("extendedTextMessageData", {}).get("text", "")
 
     # 2. Capture Photo (Green API often uses 'fileMessageData' for images)
-    image_info = msg_data.get("imageMessageData") or msg_data.get("fileMessageData")
+    image_info = (
+        msg_data.get("imageMessageData") or 
+        msg_data.get("fileMessageData") or 
+        msg_data.get("documentMessageData")
+    )
     
     # If there is text OR an image, process it
     if text or image_info:
