@@ -364,17 +364,32 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         db_manager.update_profile(uid, "contact_phone", msg)
 
         matches = db_manager.get_matches(uid)
-        matches = db_manager.get_matches(uid)
         if not matches: 
-            # Send them to a HOLDING state, not NEW
             db_manager.set_state(uid, "AWAITING_MATCHES") 
             return "✅ Profile saved! We couldn't find matches right now. Type *STATUS* later to check again."
         
+        # --- NEW PREVIEW LOGIC ---
+        send_whatsapp_message(phone, "🔥 *Matches Found!* Here is a preview of people looking for you:")
+
+        # Send separate messages for each match (Limit to first 3 to avoid spamming)
+        for m in matches[:3]:
+            # Same caption as successful payment, but with contact HIDDEN
+            preview_caption = (f"👤 *Name:* {m['name']}\n"
+                               f"🎂 *Age:* {m['age']}\n"
+                               f"📍 *Location:* {m['location']}\n"
+                               f"📞 *Contact:* [Locked 🔒 Pay to View]")
+            
+            if m.get('picture'):
+                send_whatsapp_image(phone, m['picture'], preview_caption)
+            else:
+                send_whatsapp_message(phone, preview_caption)
+    
+        # After showing the pictures, move to the payment selection
         db_manager.set_state(uid, "CHOOSE_CURRENCY")
-        reply = "🔥 *Matches Found!* 🔥\n"
-        for m in matches: reply += f"• {m['name']} — {m['location']}\n"
-        reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
-        return reply
+        return ("\n✨ *Unlock all details and contact numbers!*\n\n"
+                "Select Currency to continue:\n"
+                "1️⃣ USD ($2.00)\n"
+                "2️⃣ ZiG (80 ZiG)")
 
     if state == "CHOOSE_CURRENCY":
         if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
