@@ -108,6 +108,9 @@ def get_matches(user_id):
 
     valid_matches = []
     
+    # --- ADDED: Prepare user location for comparison ---
+    user_location = (user.get('location') or "").strip().lower()
+
     for cand in candidates:
         u_intent = user['intent'].lower()
         c_intent = cand['intent'].lower()
@@ -115,7 +118,6 @@ def get_matches(user_id):
         match_found = False
 
         # RULE A: Sugar Mummy + Benten
-        # (Sugar Mummy is older than Benten)
         if (u_intent == "sugar mummy" and c_intent == "benten"):
             if user['age'] > cand['age']: match_found = True
             
@@ -123,7 +125,6 @@ def get_matches(user_id):
             if cand['age'] > user['age']: match_found = True
 
         # RULE B: Sugar Daddy + Girlfriend 
-        # (Sugar Daddy is older than Girlfriend)
         elif (u_intent == "sugar daddy" and c_intent == "girlfriend"):
             if user['age'] > cand['age']: match_found = True
             
@@ -131,15 +132,13 @@ def get_matches(user_id):
             if cand['age'] > user['age']: match_found = True
 
         # RULE C: Boyfriend + Girlfriend
-        # Must match within preferred age ranges (Mutual)
         elif (u_intent == "boyfriend" and c_intent == "girlfriend") or \
              (u_intent == "girlfriend" and c_intent == "boyfriend"):
             if (user['age_min'] <= cand['age'] <= user['age_max']) and \
                (cand['age_min'] <= user['age'] <= cand['age_max']):
                 match_found = True
 
-        # RULE D: Casual/Friends (1 night stand, just vibes, friend)
-        # Must have same intent AND mutual age preference
+        # RULE D: Casual/Friends
         elif u_intent == c_intent and u_intent in ["1 night stand", "just vibes", "friend"]:
             if (user['age_min'] <= cand['age'] <= user['age_max']) and \
                (cand['age_min'] <= user['age'] <= cand['age_max']):
@@ -148,9 +147,26 @@ def get_matches(user_id):
         if match_found:
             valid_matches.append(cand)
 
-    # 3. Return 4 random matches (or all if less than 4)
+    # --- LOCATION LOGIC: Sort and Sample ---
     if valid_matches:
-        return random.sample(valid_matches, min(4, len(valid_matches)))
+        # Separate matches into local and others
+        local_matches = []
+        other_matches = []
+        
+        for m in valid_matches:
+            cand_location = (m.get('location') or "").strip().lower()
+            if user_location and (user_location in cand_location or cand_location in user_location):
+                local_matches.append(m)
+            else:
+                other_matches.append(m)
+        
+        # Shuffle both lists to keep variety
+        random.shuffle(local_matches)
+        random.shuffle(other_matches)
+        
+        # Combine: Priority to local_matches
+        final_selection = (local_matches + other_matches)[:4]
+        return final_selection
     
     return []
 # -------------------------------------------------
