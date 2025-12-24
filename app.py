@@ -251,7 +251,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             return ("💖 What are you looking for?\n\n"
                     "2️⃣ Sugar daddy\n"
                     "3️⃣ Benten\n"
-                    "4️⃣ Girlfriend\n"
+                    "5️⃣ Boyfriend\n"
                     "6️⃣ 1 night stand\n"
                     "7️⃣ Just vibes\n"
                     "8️⃣ Friend")
@@ -437,7 +437,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                 f"📲 Please check the phone for **{clean_num}** right now. "
                 "A prompt will appear asking for your **PIN**.\n\n"
                 "⏳ *What to do next:*\n"
-                "1. Enter your PIN carefully.\n"
+                "1. On the phone, Enter your PIN carefully.\n"
                 "2. Wait patiently while we process the transaction.\n"
                 "3. This usually takes **less than 3 minutes**.\n\n"
                 "✅ Once confirmed, your matches will be sent automatically to this chat! "

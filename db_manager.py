@@ -87,34 +87,72 @@ def get_matches(user_id):
     c = conn()
     cur = c.cursor(dictionary=True)
 
+    # 1. Get current user's profile
     cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
     user = cur.fetchone()
     if not user:
+        cur.close()
+        c.close()
         return []
 
-    # Basic matching: Heterosexual, within age range, matching intent
+    # 2. Basic Query: Opposite gender only
     cur.execute("""
         SELECT * FROM profiles 
         WHERE user_id != %s 
-        AND gender = %s 
-        AND age BETWEEN %s AND %s
-    """, (user_id, user['preferred_gender'], user['age_min'], user['age_max']))
+        AND gender = %s
+    """, (user_id, user['preferred_gender']))
     
     candidates = cur.fetchall()
     cur.close()
     c.close()
 
-    # Filter by intent and mutual age preference
     valid_matches = []
+    
     for cand in candidates:
-        # Check if user fits in candidate's age range
-        if cand['age_min'] <= user['age'] <= cand['age_max']:
+        u_intent = user['intent'].lower()
+        c_intent = cand['intent'].lower()
+        
+        match_found = False
+
+        # RULE A: Sugar Mummy + Benten
+        # (Sugar Mummy is older than Benten)
+        if (u_intent == "sugar mummy" and c_intent == "benten"):
+            if user['age'] > cand['age']: match_found = True
+            
+        elif (u_intent == "benten" and c_intent == "sugar mummy"):
+            if cand['age'] > user['age']: match_found = True
+
+        # RULE B: Sugar Daddy + Girlfriend 
+        # (Sugar Daddy is older than Girlfriend)
+        elif (u_intent == "sugar daddy" and c_intent == "girlfriend"):
+            if user['age'] > cand['age']: match_found = True
+            
+        elif (u_intent == "girlfriend" and c_intent == "sugar daddy"):
+            if cand['age'] > user['age']: match_found = True
+
+        # RULE C: Boyfriend + Girlfriend
+        # Must match within preferred age ranges (Mutual)
+        elif (u_intent == "boyfriend" and c_intent == "girlfriend") or \
+             (u_intent == "girlfriend" and c_intent == "boyfriend"):
+            if (user['age_min'] <= cand['age'] <= user['age_max']) and \
+               (cand['age_min'] <= user['age'] <= cand['age_max']):
+                match_found = True
+
+        # RULE D: Casual/Friends (1 night stand, just vibes, friend)
+        # Must have same intent AND mutual age preference
+        elif u_intent == c_intent and u_intent in ["1 night stand", "just vibes", "friend"]:
+            if (user['age_min'] <= cand['age'] <= user['age_max']) and \
+               (cand['age_min'] <= user['age'] <= cand['age_max']):
+                match_found = True
+
+        if match_found:
             valid_matches.append(cand)
 
+    # 3. Return 4 random matches (or all if less than 4)
     if valid_matches:
-        return random.sample(valid_matches, min(2, len(valid_matches)))
+        return random.sample(valid_matches, min(4, len(valid_matches)))
+    
     return []
-
 # -------------------------------------------------
 # USER & PROFILE HELPERS
 # -------------------------------------------------
