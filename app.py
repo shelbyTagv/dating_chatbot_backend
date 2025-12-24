@@ -16,16 +16,21 @@ import db_manager
 # APP & CONFIG
 # -------------------------------------------------
 app = FastAPI()
+CHANNEL_LINK = "https://whatsapp.com/channel/0029VbC8NmJICVfoA76whO3I"
+CHANNEL_ID = "120363385759714853@newsletter"
 
 GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN_INSTANCE = os.getenv("API_TOKEN_INSTANCE")
 GREEN_API_AUTH_TOKEN = os.getenv("GREEN_API_AUTH_TOKEN")
 
+
+
 INTEGRATION_KEY = os.getenv("PESEPAY_INTEGRATION_KEY")
 ENCRYPTION_KEY = os.getenv("PESEPAY_ENCRYPTION_KEY")
 RETURN_URL = os.getenv("PAYNOW_RETURN_URL")
 RESULT_URL = os.getenv("PAYNOW_RESULT_URL")
+
 
 
 integration_key = INTEGRATION_KEY.strip()
@@ -42,6 +47,35 @@ pesepay.result_url = RESULT_URL
 # -------------------------------------------------
 # WHATSAPP UTILS
 # -------------------------------------------------
+
+def send_channel_alert(name, age, location, intent, picture_url):
+    """Sends a blurred preview alert to the WhatsApp Channel"""
+    url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUrl/{API_TOKEN_INSTANCE}"
+    
+    # We use a placeholder 'blurred' image URL to tease users 
+    # Or use the candidate's real picture_url if you want it visible
+    image_to_send = picture_url if picture_url else "https://placehold.co/600x400?text=Photo+Hidden"
+
+    caption = (
+        f"🔔 *NEW CANDIDATE JOINED!* 🔔\n\n"
+        f"👤 *Name:* {name}\n"
+        f"🎂 *Age:* {age}\n"
+        f"📍 *Location:* {location}\n"
+        f"💖 *Looking for:* {intent}\n\n"
+        f"👉 *Find them on the Bot here:* \nhttps://wa.me/{ID_INSTANCE.replace('waInstance', '')}"
+    )
+
+    payload = {
+        "chatId": CHANNEL_ID,
+        "urlFile": image_to_send,
+        "fileName": "preview.jpg",
+        "caption": caption
+    }
+
+    try:
+        requests.post(url, json=payload, timeout=15)
+    except Exception as e:
+        print(f"Channel Alert Error: {e}")
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {"chatId": f"{phone}@c.us", "message": text}
@@ -346,7 +380,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         return "I saw your message, but I couldn't process the photo. Please try sending it again as a standard gallery image."
     
 
-    # Insert this block before the other state checks in handle_message
+    # 1. UPDATED AWAITING_MATCHES STATE
     if state == "AWAITING_MATCHES":
         if msg_l == "status":
             matches = db_manager.get_matches(uid)
@@ -358,9 +392,10 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                 reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
                 return reply
             else:
+                # ADDED CHANNEL LINK HERE
                 return ("⏳ Still looking for matches that fit your profile...\n\n"
-                        "Check back later by typing *STATUS*.\n"
-                        "Or type *EXIT* to restart and change your profile details.")
+                        f"📢 *Join our Channel* to see new people as they join:\n{CHANNEL_LINK}\n\n"
+                        "Check back here later by typing *STATUS*.")
 
         if msg_l == "exit":
             db_manager.reset_profile(uid)
@@ -369,6 +404,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
         return "🔍 You are currently waiting for matches. Type *STATUS* to check again or *EXIT* to redo your profile."
 
+   # 2. UPDATED GET_PHONE STATE (The Preview Logic)
     if state == "GET_PHONE":
         clean_num = msg.strip().replace(" ", "").replace("+263", "0")
         if not is_valid_zim_phone(clean_num):
@@ -376,17 +412,32 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
         db_manager.update_profile(uid, "contact_phone", msg)
 
+        # --- NEW: ALERT THE CHANNEL ---
+        # Fetch the newly completed profile info
+        new_prof = db_manager.get_profile(uid)
+        if new_prof:
+            send_channel_alert(
+                new_prof['name'], 
+                new_prof['age'], 
+                new_prof['location'], 
+                new_prof['intent'], 
+                new_prof['picture']
+            )
+        # ------------------------------
+
+
         matches = db_manager.get_matches(uid)
+
         if not matches: 
             db_manager.set_state(uid, "AWAITING_MATCHES") 
-            return "✅ Profile saved! We couldn't find matches right now. Type *STATUS* later to check again."
+            # ADDED CHANNEL LINK HERE
+            return ("✅ Profile saved! We couldn't find matches right now.\n\n"
+                    f"🚀 *Don't wait!* Join our WhatsApp Channel for daily updates:\n{CHANNEL_LINK}\n\n"
+                    "Type *STATUS* here later to check again.")
         
-        # --- NEW PREVIEW LOGIC ---
         send_whatsapp_message(phone, "🔥 *Matches Found!* Here is a preview of people looking for you:")
 
-        # Send separate messages for each match (Limit to first 3 to avoid spamming)
         for m in matches[:3]:
-            # Same caption as successful payment, but with contact HIDDEN
             preview_caption = (f"👤 *Name:* {m['name']}\n"
                                f"🎂 *Age:* {m['age']}\n"
                                f"📍 *Location:* {m['location']}\n"
@@ -397,12 +448,13 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             else:
                 send_whatsapp_message(phone, preview_caption)
     
-        # After showing the pictures, move to the payment selection
         db_manager.set_state(uid, "CHOOSE_CURRENCY")
+        # ADDED CHANNEL LINK TO PAYMENT PROMPT
         return ("\n✨ *Unlock all details and contact numbers!*\n\n"
                 "Select Currency to continue:\n"
                 "1️⃣ USD ($2.00)\n"
-                "2️⃣ ZiG (80 ZiG)")
+                "2️⃣ ZiG (80 ZiG)\n\n"
+                f"👉 *Follow our Channel for more:* {CHANNEL_LINK}")
 
     if state == "CHOOSE_CURRENCY":
         if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
