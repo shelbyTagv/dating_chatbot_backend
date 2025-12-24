@@ -16,8 +16,6 @@ import db_manager
 # APP & CONFIG
 # -------------------------------------------------
 app = FastAPI()
-CHANNEL_LINK = "https://whatsapp.com/channel/0029VbC8NmJICVfoA76whO3I"
-CHANNEL_ID = "120363385759714853@newsletter"
 
 GREEN_API_URL = "https://api.greenapi.com"
 ID_INSTANCE = os.getenv("ID_INSTANCE")
@@ -66,7 +64,6 @@ def send_channel_alert(name, age, location, intent, picture_url):
     )
 
     payload = {
-        "chatId": CHANNEL_ID,
         "urlFile": image_to_send,
         "fileName": "preview.jpg",
         "caption": caption
@@ -396,7 +393,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             else:
                 # ADDED CHANNEL LINK HERE
                 return ("⏳ Still looking for matches that fit your profile...\n\n"
-                        f"📢 *Join our Channel* to see new people as they join:\n{CHANNEL_LINK}\n\n"
+    
                         "Check back here later by typing *STATUS*.")
 
         if msg_l == "exit":
@@ -432,9 +429,9 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
         if not matches: 
             db_manager.set_state(uid, "AWAITING_MATCHES") 
-            # ADDED CHANNEL LINK HERE
+        
             return ("✅ Profile saved! We couldn't find matches right now.\n\n"
-                    f"🚀 *Don't wait!* Join our WhatsApp Channel for daily updates:\n{CHANNEL_LINK}\n\n"
+            
                     "Type *STATUS* here later to check again.")
         
         send_whatsapp_message(phone, "🔥 *Matches Found!* Here is a preview of people looking for you:")
@@ -451,12 +448,12 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                 send_whatsapp_message(phone, preview_caption)
     
         db_manager.set_state(uid, "CHOOSE_CURRENCY")
-        # ADDED CHANNEL LINK TO PAYMENT PROMPT
+        
         return ("\n✨ *Unlock all details and contact numbers!*\n\n"
                 "Select Currency to continue:\n"
                 "1️⃣ USD ($2.00)\n"
                 "2️⃣ ZiG (80 ZiG)\n\n"
-                f"👉 *Follow our Channel for more:* {CHANNEL_LINK}")
+                )
 
     if state == "CHOOSE_CURRENCY":
         if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
