@@ -207,6 +207,7 @@ def send_whatsapp_image(phone: str, image_path: str, caption: str):
 # -------------------------------------------------
 
 def handle_message(phone: str, text: str, payload: dict) -> str:
+    print(f"DEBUG DATA: {payload}")
     msg = text.strip() if text else ""
     msg_l = msg.lower()
     user = db_manager.get_user_by_phone(phone)
