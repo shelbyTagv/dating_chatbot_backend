@@ -519,6 +519,19 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 # -------------------------------------------------
 # WEBHOOK ENDPOINT
 # -------------------------------------------------
+
+@app.post("/webhook")
+async def webhook(request: Request):
+    payload = await request.json()
+    
+    # Get the ID of the chat where the message came from
+    chat_id = payload.get("senderData", {}).get("chatId", "Unknown")
+    
+    # The bot will send the ID back to the chat as a message
+    send_whatsapp_message(chat_id.split('@')[0], f"📍 The ID for this chat is: {chat_id}")
+    
+    return JSONResponse({"status": "ok"})
+"""
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
@@ -554,3 +567,4 @@ async def webhook(request: Request):
             send_whatsapp_message(phone, reply)
 
     return JSONResponse({"status": "processed"})
+    """
