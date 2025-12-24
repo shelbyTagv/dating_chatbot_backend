@@ -143,7 +143,7 @@ def startup():
 
 def is_valid_zim_phone(number):
     # Matches 077, 078, 071 followed by 7 digits
-    pattern = r"^(077|078|071)\d{7}$"
+    pattern = r"^(077|078|071|073)\d{7}$"
     return re.match(pattern, number)
 # -------------------------------------------------
 # PESEPAY SEAMLESS LOGIC
