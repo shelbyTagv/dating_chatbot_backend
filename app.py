@@ -54,7 +54,7 @@ def send_channel_alert(name, age, location, intent, picture_url):
     
     # We use a placeholder 'blurred' image URL to tease users 
     # Or use the candidate's real picture_url if you want it visible
-    image_to_send = picture_url if picture_url else "https://placehold.co/600x400?text=Photo+Hidden"
+    image_to_send = picture_url if picture_url else "https://www.classifieds.co.zw/storage/App/Models/Attachment/files/011/040/977/medium/o_1jcg88g5etuk4rd1n3m1eiv1g37.webp"
 
     caption = (
         f"🔔 *NEW CANDIDATE JOINED!* 🔔\n\n"
@@ -76,6 +76,7 @@ def send_channel_alert(name, age, location, intent, picture_url):
         requests.post(url, json=payload, timeout=15)
     except Exception as e:
         print(f"Channel Alert Error: {e}")
+        
 def send_whatsapp_message(phone: str, text: str):
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendMessage/{API_TOKEN_INSTANCE}"
     payload = {"chatId": f"{phone}@c.us", "message": text}
