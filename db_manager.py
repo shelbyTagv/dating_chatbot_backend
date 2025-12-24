@@ -113,7 +113,7 @@ def get_matches(user_id):
 
     for cand in candidates:
         u_intent = user['intent'].lower()
-        c_intent = cand['intent'].lower()
+        c_intent = (cand.get('intent') or "").lower()
         
         match_found = False
 
