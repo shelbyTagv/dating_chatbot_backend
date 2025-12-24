@@ -520,21 +520,6 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    payload = await request.json()
-    
-    # Extract sender info (adjust based on your actual payload structure)
-    # Looking at your logs, it seems you use 'sender' from 'senderData'
-    phone = payload.get('senderData', {}).get('sender', '')
-    
-    # Remove characters like '@c.us', '+', or spaces if they exist
-    clean_phone = phone.split('@')[0].replace('+', '').replace(' ', '')
-
-    # Validation: Only allow Zimbabwean numbers (starting with 263)
-    if not clean_phone.startswith("263"):
-        print(f"Blocking non-ZW number: {clean_phone}")
-        return {"status": "ignored", "reason": "non-zimbabwean_number"}
-
-
     auth = request.headers.get("Authorization")
     if GREEN_API_AUTH_TOKEN and auth != f"Bearer {GREEN_API_AUTH_TOKEN}":
         raise HTTPException(status_code=401)
