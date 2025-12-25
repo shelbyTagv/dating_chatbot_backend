@@ -309,16 +309,16 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         preferred = "female" if msg_l == "male" else "male"
         db_manager.update_profile(uid, "preferred_gender", preferred)
 
-        # RE-FETCH user to get the latest 'user_type' from DB
+        # RE-FETCH to get the fresh 'user_type'
         user = db_manager.get_user_by_phone(phone)
         u_type = user.get("user_type", "CITIZEN")
 
         if u_type == "STUDENT":
             db_manager.set_state(uid, "GET_NAME")
-            # We MUST return here so the code below doesn't run
+            # --- CRITICAL FIX: RETURN IMMEDIATELY ---
             return "📝 Great! What is your name?"
         
-        # If not a student, move to Citizen Intent
+        # --- CITIZEN ONLY LOGIC ---
         db_manager.set_state(uid, "GET_INTENT")
         if msg_l == "male":
             return ("💖 What are you looking for?\n\n"
@@ -357,11 +357,17 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
 
     if state == "GET_NAME":
-        # Check if the name is too short or contains weird characters
         if len(msg) < 3 or len(msg) > 20:
             return "❗ Please enter a valid name (3–20 characters)."
         
         db_manager.update_profile(uid, "name", msg)
+        
+        # Ensure Students have an age range set so matching works
+        user = db_manager.get_user_by_phone(phone)
+        if user.get("user_type") == "STUDENT":
+            db_manager.update_profile(uid, "age_min", 18)
+            db_manager.update_profile(uid, "age_max", 30)
+
         db_manager.set_state(uid, "GET_AGE")
         return "🎂 How old are you?"
         
