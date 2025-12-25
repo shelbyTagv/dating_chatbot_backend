@@ -46,7 +46,6 @@ pesepay.result_url = RESULT_URL
 # WHATSAPP UTILS
 # -------------------------------------------------
 
-
 def send_channel_alert(name, age, location, intent, picture_url):
     """Sends a blurred preview alert to the WhatsApp Channel"""
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUrl/{API_TOKEN_INSTANCE}"
@@ -535,12 +534,6 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 # WEBHOOK ENDPOINT
 # -------------------------------------------------
 
-import openai
-from fastapi.responses import JSONResponse
-
-# Add your OpenAI Key to your .env file
-openai.api_key = os.getenv("OPENAI_API_KEY")
-
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
@@ -549,53 +542,30 @@ async def webhook(request: Request):
 
     payload = await request.json()
     
+    # Debug: This will print the raw data to your terminal so you can see if the photo arrives
+    print(f"RAW PAYLOAD: {payload}")
+
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
-    # --- 1. ZIMBABWE VALIDATION GATEKEEPER ---
     phone = payload.get("senderData", {}).get("chatId", "").split("@")[0]
-    if not phone.startswith("263"):
-        # We silently ignore non-Zim numbers
-        return JSONResponse({"status": "ignored", "reason": "non_zimbabwean"})
-
     msg_data = payload.get("messageData", {})
+    
+    # 1. Capture Text
     text = msg_data.get("textMessageData", {}).get("textMessage", "") or \
            msg_data.get("extendedTextMessageData", {}).get("text", "")
 
-    # Check for photo content
+    # 2. Capture Photo (Green API often uses 'fileMessageData' for images)
     image_info = (
         msg_data.get("imageMessageData") or 
         msg_data.get("fileMessageData") or 
         msg_data.get("documentMessageData")
     )
     
+    # If there is text OR an image, process it
     if text or image_info:
-        # Get the standard bot reply
         reply = handle_message(phone, text, payload)
-        
-        # --- 2. OPENAI INTERACTIVE FALLBACK ---
-        # If the bot is about to send the "End of chat/Start over" message, 
-        # we check if AI can give a better, more human response instead.
-        if "type *HELLO*" in reply and text:
-            reply = get_ai_response(text)
-            
         if reply:
             send_whatsapp_message(phone, reply)
 
     return JSONResponse({"status": "processed"})
-
-def get_ai_response(user_text):
-    """Uses OpenAI to keep the bot interactive for off-script questions."""
-    try:
-        response = openai.chat.completions.create(
-            model="gpt-3.5-turbo",
-            messages=[
-                {"role": "system", "content": "You are Shelby, a helpful Zimbabwean dating assistant. If a user asks a question, answer concisely with local Zimbabwe slang (like 'shamwari', 'shaz'). If they seem lost, tell them to type HELLO to start the dating process."},
-                {"role": "user", "content": user_text}
-            ],
-            max_tokens=150
-        )
-        return response.choices[0].message.content
-    except Exception as e:
-        print(f"AI Error: {e}")
-        return "👋 I'm here to help! Type *HELLO* to start finding your match."
