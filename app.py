@@ -398,7 +398,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                 reply = "🔥 *Matches Found!* 🔥\n"
                 for m in matches: 
                     reply += f"• {m['name']} — {m['location']}\n"
-                reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
+                reply += "\nSelect Currency:\n1️⃣ USD ($1.00)\n2️⃣ ZiG (40 ZiG)"
                 return reply
             else:
                 # ADDED CHANNEL LINK HERE
@@ -461,8 +461,8 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         return ("\n✨ *Unlock all details and contact numbers!*\n\n"
                 "Select Currency to continue:\n"
-                "1️⃣ USD ($2.00)\n"
-                "2️⃣ ZiG (80 ZiG)\n\n"
+                "1️⃣ USD ($1.00)\n"
+                "2️⃣ ZiG (40 ZiG)\n\n"
                 )
 
     if state == "CHOOSE_CURRENCY":
@@ -480,13 +480,13 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         # Determine parameters based on state
         if state == "AWAITING_ECOCASH_USD":
-            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 2.00)
+            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
             method_name = "EcoCash USD"
         elif state == "AWAITING_ECOCASH_ZIG":
-            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 80.00) # Updated to ZWG
+            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00) # Updated to ZWG
             method_name = "EcoCash ZiG"
         else:
-            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 2.00)
+            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
             method_name = "InnBucks"
 
         if success:
