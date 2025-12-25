@@ -83,8 +83,6 @@ def init_db():
 # -------------------------------------------------
 # MATCHING LOGIC
 # -------------------------------------------------
-import random
-
 def get_matches(user_id):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -92,93 +90,83 @@ def get_matches(user_id):
     # 1. Get current user's profile
     cur.execute("SELECT * FROM profiles WHERE user_id=%s", (user_id,))
     user = cur.fetchone()
-    if not user or not user.get('intent'):
+    if not user:
         cur.close()
         c.close()
         return []
 
-    user_type = user.get('user_type', 'CITIZEN')
-    user_intent = user['intent'].lower()
-    user_location = (user.get('location') or "").strip().lower()
-    
-    # 2. Fetch potential candidates (Opposite Gender + Completed Profile)
-    # We exclude the user themselves and only pick those in the matching state
+    # 2. Basic Query: Opposite gender only
     cur.execute("""
         SELECT * FROM profiles 
         WHERE user_id != %s 
-        AND gender = %s 
-        AND chat_state = 'AWAITING_MATCHES'
-    """, (user_id, user.get('preferred_gender')))
+        AND gender = %s
+    """, (user_id, user['preferred_gender']))
     
     candidates = cur.fetchall()
     cur.close()
     c.close()
 
     valid_matches = []
+    
+    # --- ADDED: Prepare user location for comparison ---
+    user_location = (user.get('location') or "").strip().lower()
 
     for cand in candidates:
-        # Safety fix: Handle NoneType for intent
+        u_intent = user['intent'].lower()
         c_intent = (cand.get('intent') or "").lower()
-        c_type = cand.get('user_type', 'CITIZEN')
         
-        # --- BRANCH 1: UNIVERSITY STUDENT LOGIC ---
-        if user_type == 'STUDENT':
-            # Students ONLY match with other Students
-            if c_type == 'STUDENT':
-                # Check if candidate is at the university the user is targeting
-                # AND user matches the university the candidate is targeting
-                same_uni_path = (cand.get('university') == user.get('target_university'))
-                
-                # Check Student Intents (Must be identical: e.g., both want 'chills')
-                if same_uni_path and user_intent == c_intent:
-                    valid_matches.append(cand)
-            continue # Move to next candidate, don't run citizen logic for students
+        match_found = False
 
-        # --- BRANCH 2: CITIZEN LOGIC (Original Rules) ---
-        if c_type == 'CITIZEN':
-            match_found = False
+        # RULE A: Sugar Mummy + Benten
+        if (u_intent == "sugar mummy" and c_intent == "benten"):
+            if user['age'] > cand['age']: match_found = True
+            
+        elif (u_intent == "benten" and c_intent == "sugar mummy"):
+            if cand['age'] > user['age']: match_found = True
 
-            # RULE A: Sugar Mummy + Benten
-            if (user_intent == "sugar mummy" and c_intent == "benten"):
-                if user['age'] > cand['age']: match_found = True
-            elif (user_intent == "benten" and c_intent == "sugar mummy"):
-                if cand['age'] > user['age']: match_found = True
+        # RULE B: Sugar Daddy + Girlfriend 
+        elif (u_intent == "sugar daddy" and c_intent == "girlfriend"):
+            if user['age'] > cand['age']: match_found = True
+            
+        elif (u_intent == "girlfriend" and c_intent == "sugar daddy"):
+            if cand['age'] > user['age']: match_found = True
 
-            # RULE B: Sugar Daddy + Girlfriend 
-            elif (user_intent == "sugar daddy" and c_intent == "girlfriend"):
-                if user['age'] > cand['age']: match_found = True
-            elif (user_intent == "girlfriend" and c_intent == "sugar daddy"):
-                if cand['age'] > user['age']: match_found = True
+        # RULE C: Boyfriend + Girlfriend
+        elif (u_intent == "boyfriend" and c_intent == "girlfriend") or \
+             (u_intent == "girlfriend" and c_intent == "boyfriend"):
+            if (user['age_min'] <= cand['age'] <= user['age_max']) and \
+               (cand['age_min'] <= user['age'] <= cand['age_max']):
+                match_found = True
 
-            # RULE C: Boyfriend + Girlfriend or Casual/Friends
-            elif (user_intent == c_intent) or \
-                 (user_intent in ["boyfriend", "girlfriend"] and c_intent in ["boyfriend", "girlfriend"]):
-                # Standard Age Range Check
-                if (user['age_min'] <= cand['age'] <= user['age_max']) and \
-                   (cand['age_min'] <= user['age'] <= cand['age_max']):
-                    match_found = True
+        # RULE D: Casual/Friends
+        elif u_intent == c_intent and u_intent in ["1 night stand", "just vibes", "friend"]:
+            if (user['age_min'] <= cand['age'] <= user['age_max']) and \
+               (cand['age_min'] <= user['age'] <= cand['age_max']):
+                match_found = True
 
-            if match_found:
-                valid_matches.append(cand)
+        if match_found:
+            valid_matches.append(cand)
 
-    # 3. LOCATION SORTING & SAMPLING
+    # --- LOCATION LOGIC: Sort and Sample ---
     if valid_matches:
+        # Separate matches into local and others
         local_matches = []
         other_matches = []
         
         for m in valid_matches:
             cand_location = (m.get('location') or "").strip().lower()
-            # If student, location is less important than Uni, but we still check
             if user_location and (user_location in cand_location or cand_location in user_location):
                 local_matches.append(m)
             else:
                 other_matches.append(m)
         
+        # Shuffle both lists to keep variety
         random.shuffle(local_matches)
         random.shuffle(other_matches)
         
-        # Return top 4 results, prioritizing local ones
-        return (local_matches + other_matches)[:4]
+        # Combine: Priority to local_matches
+        final_selection = (local_matches + other_matches)[:4]
+        return final_selection
     
     return []
 # -------------------------------------------------
@@ -220,12 +208,11 @@ def ensure_profile(uid):
     cur.close()
     c.close()
 
-def update_profile(user_id, field, value):
+def update_profile(uid, field, value):
     c = conn()
     cur = c.cursor()
-    # Ensure your SQL table has these columns!
-    query = f"UPDATE profiles SET {field} = %s WHERE user_id = %s"
-    cur.execute(query, (value, user_id))
+    query = f"UPDATE profiles SET {field}=%s WHERE user_id=%s"
+    cur.execute(query, (value, uid))
     c.commit()
     cur.close()
     c.close()
