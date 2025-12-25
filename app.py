@@ -7,7 +7,7 @@ load_dotenv()
 app = FastAPI()
 
 # Config
-GREEN_API_URL = f"https://api.greenapi.com/waInstance{os.getenv('ID_INSTANCE')}"
+GREEN_API_URL = f"https://api.greenapi.com/waInstance{os.getenv('ID INSTANCE1')}"
 API_TOKEN = os.getenv("API_TOKEN_INSTANCE")
 pesepay = Pesepay(os.getenv("PESEPAY_INTEGRATION_KEY"), os.getenv("PESEPAY_ENCRYPTION_KEY"))
 pesepay.return_url = os.getenv("PAYNOW_RETURN_URL")
