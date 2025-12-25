@@ -411,29 +411,50 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
     if state in ["AWAITING_ECOCASH_USD", "AWAITING_ECOCASH_ZIG", "AWAITING_INNBUCKS_USD"]:
         clean_num = msg.strip().replace("+263", "0").replace("263", "0")
-        if state == "AWAITING_ECOCASH_USD": success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
-        elif state == "AWAITING_ECOCASH_ZIG": success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00)
-        else: success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
+        
+        # Determine parameters based on state
+        if state == "AWAITING_ECOCASH_USD":
+            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
+            method_name = "EcoCash USD"
+        elif state == "AWAITING_ECOCASH_ZIG":
+            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00) # Updated to ZWG
+            method_name = "EcoCash ZiG"
+        else:
+            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
+            method_name = "InnBucks"
 
         if success:
             db_manager.set_state(uid, "PAYMENT_PENDING")
-            return "🚀 Prompt sent! Enter your PIN on your phone and wait. Type *STATUS* to check manually."
-        return "❌ Error sending prompt. Check number and try again."
+            
+            # --- CUSTOM SUCCESS MESSAGE ---
+            return (
+                f"🚀 *Payment Initiated via {method_name}!*\n\n"
+                f"📲 Please check the phone for **{clean_num}** right now. "
+                "A prompt will appear asking for your **PIN**.\n\n"
+                "⏳ *What to do next:*\n"
+                "1. On the phone, Enter your PIN carefully.\n"
+                "2. Wait patiently while we process the transaction.\n"
+                "3. This usually takes **less than 3 minutes**.\n\n"
+                "✅ Once confirmed, your matches will be sent automatically to this chat! "
+                "You can also type *STATUS* to check manually."
+            )
+        
+        return "❌ Error sending prompt. Please check your number and try again."
 
     if state == "PAYMENT_PENDING":
         if msg_l == "status":
             pending = db_manager.get_pending_payments_for_user(uid)
-            if not pending: return "❌ No active payment."
+            if not pending: return "❌ No active payment. Type *HELLO*."
             res = pesepay.poll_transaction(pending[0]['poll_url'])
             if res.success and res.paid:
                 process_successful_payment(uid, pending[0]['reference'])
-                return "✅ Verified! Matches incoming..."
-            return "⏳ Not paid. Enter PIN and type *STATUS* again."
+                return "✅ Verified! Sending matches..."
+            return "⏳ Not paid yet. Enter PIN and type *STATUS* again."
         return "⏳ Waiting for PIN. Type *STATUS* to check."
 
+    # This is the final fallback for any unrecognized message or state
     db_manager.set_state(uid, "NEW")
-    return "❗ Chat ended. Type *HELLO* to restart."
-
+    return "❗ Chat ended:Please type *HELLO* or *HI* to start finding matches."
 
 
 # -------------------------------------------------
