@@ -309,32 +309,32 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         preferred = "female" if msg_l == "male" else "male"
         db_manager.update_profile(uid, "preferred_gender", preferred)
 
-        # IMPORTANT: Refresh user data from DB to get the latest 'user_type'
+        # RE-FETCH user to get the latest 'user_type' from DB
         user = db_manager.get_user_by_phone(phone)
         u_type = user.get("user_type", "CITIZEN")
 
         if u_type == "STUDENT":
-            # SKIP the citizen intent menu
             db_manager.set_state(uid, "GET_NAME")
+            # We MUST return here so the code below doesn't run
             return "📝 Great! What is your name?"
-        else:
-            # PROCEED to citizen intent menu
-            db_manager.set_state(uid, "GET_INTENT")
-            if msg_l == "male":
-                return ("💖 What are you looking for?\n\n"
-                        "1️⃣ Sugar mummy\n"
-                        "4️⃣ Girlfriend\n"
-                        "6️⃣ 1 night stand\n"
-                        "7️⃣ Just vibes\n"
-                        "8️⃣ Friend")
-            else: # female
-                return ("💖 What are you looking for?\n\n"
-                        "2️⃣ Sugar daddy\n"
-                        "3️⃣ Benten\n"
-                        "5️⃣ Boyfriend\n"
-                        "6️⃣ 1 night stand\n"
-                        "7️⃣ Just vibes\n"
-                        "8️⃣ Friend")
+        
+        # If not a student, move to Citizen Intent
+        db_manager.set_state(uid, "GET_INTENT")
+        if msg_l == "male":
+            return ("💖 What are you looking for?\n\n"
+                    "1️⃣ Sugar mummy\n"
+                    "4️⃣ Girlfriend\n"
+                    "6️⃣ 1 night stand\n"
+                    "7️⃣ Just vibes\n"
+                    "8️⃣ Friend")
+        else: # female
+            return ("💖 What are you looking for?\n\n"
+                    "2️⃣ Sugar daddy\n"
+                    "3️⃣ Benten\n"
+                    "5️⃣ Boyfriend\n"
+                    "6️⃣ 1 night stand\n"
+                    "7️⃣ Just vibes\n"
+                    "8️⃣ Friend")
 
     if state == "GET_INTENT":
         # Straightforward: Just get the intent from the map. No gender validation.
