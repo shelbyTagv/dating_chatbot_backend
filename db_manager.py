@@ -220,11 +220,12 @@ def ensure_profile(uid):
     cur.close()
     c.close()
 
-def update_profile(uid, field, value):
+def update_profile(user_id, field, value):
     c = conn()
     cur = c.cursor()
-    query = f"UPDATE profiles SET {field}=%s WHERE user_id=%s"
-    cur.execute(query, (value, uid))
+    # Ensure your SQL table has these columns!
+    query = f"UPDATE profiles SET {field} = %s WHERE user_id = %s"
+    cur.execute(query, (value, user_id))
     c.commit()
     cur.close()
     c.close()
