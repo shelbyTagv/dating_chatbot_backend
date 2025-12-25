@@ -46,6 +46,17 @@ pesepay.result_url = RESULT_URL
 # WHATSAPP UTILS
 # -------------------------------------------------
 
+# Constants for Students
+STUDENT_INTENTS = {
+    "1": "friends",
+    "2": "boyfriend",
+    "3": "girlfriend",
+    "4": "chills",
+    "5": "just vibes"
+}
+
+ZIM_UNIVERSITIES = ["UZ", "HIT", "MSU", "NUST", "CUT", "LSU", "AU", "ZEGU", "CUZ", "GZU", "BUSE"]
+
 def send_channel_alert(name, age, location, intent, picture_url):
     """Sends a blurred preview alert to the WhatsApp Channel"""
     url = f"{GREEN_API_URL}/waInstance{ID_INSTANCE}/sendFileByUrl/{API_TOKEN_INSTANCE}"
@@ -246,17 +257,44 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
     if state == "NEW":
-        # Check if the user is saying a valid greeting to start registration
-        if msg_l in ["hello", "hi", "hey", "hie"]:
+        if msg_l in ["hello", "hi", "hey"]:
             db_manager.reset_profile(uid)
-            db_manager.set_state(uid, "GET_GENDER")
-            return ("👋 Welcome to Shelby Dating Connections!\n\n"
-                    "Looking for Love, or just vibes: we got you covered. "
-                    "Sending pictures is mandatory (you can skip by typing 'skip').\n\n"
-                    "Please select your gender:\n• MALE\n• FEMALE")
-        else:
-            # If they are NEW and send something else, just prompt them to start
-            return "👋 Welcome! Please type *HELLO* or *HI* to start finding matches."
+            db_manager.set_state(uid, "CHOOSE_USER_TYPE")
+            return ("👋 Welcome to Shelby Dating!\n\n"
+                    "Please select who you are:\n"
+                    "1️⃣ University Student (Campus Dating)\n"
+                    "2️⃣ Zimbabwean Citizen (General Dating)")
+
+    if state == "CHOOSE_USER_TYPE":
+        if msg == "1":
+            db_manager.update_profile(uid, "user_type", "STUDENT")
+            db_manager.set_state(uid, "GET_UNIVERSITY")
+            return f"🎓 Which University are you at?\nValid: {', '.join(ZIM_UNIVERSITIES)}"
+        # ... (Citizen logic) ...
+
+    if state == "GET_UNIVERSITY":
+        uni = msg.upper().strip()
+        if uni not in ZIM_UNIVERSITIES:
+            return f"❗ Please use a valid abbreviation like: {', '.join(ZIM_UNIVERSITIES[:5])}..."
+        db_manager.update_profile(uid, "university", uni)
+        db_manager.set_state(uid, "GET_TARGET_UNIVERSITY")
+        return "🎯 Which University are you targeting for matches?"
+
+    if state == "GET_TARGET_UNIVERSITY":
+        target = msg.upper().strip()
+        if target not in ZIM_UNIVERSITIES:
+             return "❗ Please enter a valid University abbreviation (e.g., UZ, HIT)."
+        db_manager.update_profile(uid, "target_university", target)
+        db_manager.set_state(uid, "GET_STUDENT_INTENT")
+        return "💖 What is your intent?\n1️⃣ Friends\n2️⃣ Boyfriend\n3️⃣ Girlfriend\n4️⃣ Chills\n5️⃣ Just vibes"
+
+    if state == "GET_STUDENT_INTENT":
+        intent = STUDENT_INTENTS.get(msg)
+        if not intent:
+            return "❗ Choose 1-5 from the menu above."
+        db_manager.update_profile(uid, "intent", intent)
+        db_manager.set_state(uid, "GET_GENDER") # Join back to the main flow for age/gender
+        return "Please select your gender:\n• MALE\n• FEMALE"
     
     if state == "GET_GENDER":
         if msg_l not in ["male", "female"]: 
@@ -388,7 +426,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                 reply = "🔥 *Matches Found!* 🔥\n"
                 for m in matches: 
                     reply += f"• {m['name']} — {m['location']}\n"
-                reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
+                reply += "\nSelect Currency:\n1️⃣ USD ($1.00)\n2️⃣ ZiG (40 ZiG)"
                 return reply
             else:
                 # ADDED CHANNEL LINK HERE
@@ -451,8 +489,8 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         return ("\n✨ *Unlock all details and contact numbers!*\n\n"
                 "Select Currency to continue:\n"
-                "1️⃣ USD ($2.00)\n"
-                "2️⃣ ZiG (80 ZiG)\n\n"
+                "1️⃣ USD ($1.00)\n"
+                "2️⃣ ZiG (40 ZiG)\n\n"
                 )
 
     if state == "CHOOSE_CURRENCY":
@@ -470,13 +508,13 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         # Determine parameters based on state
         if state == "AWAITING_ECOCASH_USD":
-            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 2.00)
+            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
             method_name = "EcoCash USD"
         elif state == "AWAITING_ECOCASH_ZIG":
-            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 80.00) # Updated to ZWG
+            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00) # Updated to ZWG
             method_name = "EcoCash ZiG"
         else:
-            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 2.00)
+            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
             method_name = "InnBucks"
 
         if success:
@@ -518,6 +556,12 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 # WEBHOOK ENDPOINT
 # -------------------------------------------------
 
+import openai
+from fastapi.responses import JSONResponse
+
+# Add your OpenAI Key to your .env file
+openai.api_key = os.getenv("OPENAI_API_KEY")
+
 @app.post("/webhook")
 async def webhook(request: Request):
     auth = request.headers.get("Authorization")
@@ -526,30 +570,53 @@ async def webhook(request: Request):
 
     payload = await request.json()
     
-    # Debug: This will print the raw data to your terminal so you can see if the photo arrives
-    print(f"RAW PAYLOAD: {payload}")
-
     if payload.get("typeWebhook") != "incomingMessageReceived":
         return JSONResponse({"status": "ignored"})
 
+    # --- 1. ZIMBABWE VALIDATION GATEKEEPER ---
     phone = payload.get("senderData", {}).get("chatId", "").split("@")[0]
+    if not phone.startswith("263"):
+        # We silently ignore non-Zim numbers
+        return JSONResponse({"status": "ignored", "reason": "non_zimbabwean"})
+
     msg_data = payload.get("messageData", {})
-    
-    # 1. Capture Text
     text = msg_data.get("textMessageData", {}).get("textMessage", "") or \
            msg_data.get("extendedTextMessageData", {}).get("text", "")
 
-    # 2. Capture Photo (Green API often uses 'fileMessageData' for images)
+    # Check for photo content
     image_info = (
         msg_data.get("imageMessageData") or 
         msg_data.get("fileMessageData") or 
         msg_data.get("documentMessageData")
     )
     
-    # If there is text OR an image, process it
     if text or image_info:
+        # Get the standard bot reply
         reply = handle_message(phone, text, payload)
+        
+        # --- 2. OPENAI INTERACTIVE FALLBACK ---
+        # If the bot is about to send the "End of chat/Start over" message, 
+        # we check if AI can give a better, more human response instead.
+        if "type *HELLO*" in reply and text:
+            reply = get_ai_response(text)
+            
         if reply:
             send_whatsapp_message(phone, reply)
 
     return JSONResponse({"status": "processed"})
+
+def get_ai_response(user_text):
+    """Uses OpenAI to keep the bot interactive for off-script questions."""
+    try:
+        response = openai.chat.completions.create(
+            model="gpt-3.5-turbo",
+            messages=[
+                {"role": "system", "content": "You are Shelby, a helpful Zimbabwean dating assistant. If a user asks a question, answer concisely with local Zimbabwe slang (like 'shamwari', 'shaz'). If they seem lost, tell them to type HELLO to start the dating process."},
+                {"role": "user", "content": user_text}
+            ],
+            max_tokens=150
+        )
+        return response.choices[0].message.content
+    except Exception as e:
+        print(f"AI Error: {e}")
+        return "👋 I'm here to help! Type *HELLO* to start finding your match."
