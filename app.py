@@ -216,46 +216,40 @@ def send_whatsapp_image(phone: str, image_path: str, caption: str):
 # -------------------------------------------------
 
 def handle_message(phone: str, text: str, payload: dict) -> str:
-    print(f"DEBUG DATA: {payload}")
     msg = text.strip() if text else ""
     msg_l = msg.lower()
+    
+    # 1. User Initialization
     user = db_manager.get_user_by_phone(phone)
-    if not user: user = db_manager.create_new_user(phone)
+    if not user: 
+        user = db_manager.create_new_user(phone)
     uid = user["id"]
+    db_manager.ensure_profile(uid)
+    
+    # 2. Global Commands
+    if msg_l == "exit": 
+        db_manager.set_state(uid, "NEW")
+        return "❌ Session ended. Type *HELLO* to start over."
 
-    # --- PROFILE COMMAND ---
     if msg_l == "profile":
         profile = db_manager.get_profile(uid)
-        
         if not profile or not profile.get("name"):
-            return "❌ Profile not found or incomplete. Type *HELLO* to start."
-
-        caption = (f"👤 *YOUR PROFILE*\n"
-                   f"━━━━━━━━━━━━━━━\n"
-                   f"📝 *Name:* {profile['name']}\n"
-                   f"🎂 *Age:* {profile['age']}\n"
-                   f"📍 *Location:* {profile['location']}\n"
-                   f"💖 *Looking for:* {profile.get('intent', 'N/A')}\n"
-                   f"📞 *Contact:* {profile.get('contact_phone', 'N/A')}")
-
+            return "❌ Profile incomplete. Type *HELLO* to start."
+        caption = (f"👤 *YOUR PROFILE*\n━━━━━━━━━━━━━━━\n"
+                   f"📝 Name: {profile['name']}\n"
+                   f"🎂 Age: {profile['age']}\n"
+                   f"📍 Location/Uni: {profile.get('university') or profile.get('location')}\n"
+                   f"💖 Looking for: {profile.get('intent')}")
         if profile.get("picture"):
-            # Sends the photo with the profile text as a caption
             send_whatsapp_image(phone, profile["picture"], caption)
-            return "" # Return empty string because the image function handled the reply
-        
+            return ""
         return caption
 
+    state = user.get("chat_state", "NEW")
 
-
-    db_manager.ensure_profile(uid)
-    state = user.get("chat_state")
-    if not state:
-        state = "NEW"
-        db_manager.set_state(uid, "NEW")
-
-
-    if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
-
+    # -------------------------------------------------
+    # STARTING FLOW
+    # -------------------------------------------------
     if state == "NEW":
         if msg_l in ["hello", "hi", "hey"]:
             db_manager.reset_profile(uid)
@@ -264,6 +258,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                     "Please select who you are:\n"
                     "1️⃣ University Student (Campus Dating)\n"
                     "2️⃣ Zimbabwean Citizen (General Dating)")
+        return "👋 Type *HELLO* to start finding matches."
 
     if state == "CHOOSE_USER_TYPE":
         if msg == "1":
@@ -272,14 +267,18 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             return f"🎓 Which University are you at?\nValid: {', '.join(ZIM_UNIVERSITIES)}"
         elif msg == "2":
             db_manager.update_profile(uid, "user_type", "CITIZEN")
-            db_manager.set_state(uid, "GET_GENDER") # Citizens go to Gender THEN Intent
+            db_manager.set_state(uid, "GET_GENDER")
             return "Please select your gender:\n• MALE\n• FEMALE"
         return "❗ Please choose 1 or 2."
 
+    # -------------------------------------------------
+    # 1. STUDENT FLOW
+    # Flow: Uni -> Target Uni -> Intent -> Gender -> Name -> Photo -> Phone
+    # -------------------------------------------------
     if state == "GET_UNIVERSITY":
         uni = msg.upper().strip()
         if uni not in ZIM_UNIVERSITIES:
-            return f"❗ Please use a valid abbreviation like: {', '.join(ZIM_UNIVERSITIES[:5])}..."
+            return f"❗ Use a valid abbreviation: {', '.join(ZIM_UNIVERSITIES[:5])}..."
         db_manager.update_profile(uid, "university", uni)
         db_manager.set_state(uid, "GET_TARGET_UNIVERSITY")
         return "🎯 Which University are you targeting for matches?"
@@ -287,123 +286,79 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
     if state == "GET_TARGET_UNIVERSITY":
         target = msg.upper().strip()
         if target not in ZIM_UNIVERSITIES:
-             return "❗ Please enter a valid University abbreviation (e.g., UZ, HIT)."
+             return "❗ Enter a valid University abbreviation (e.g., UZ, HIT)."
         db_manager.update_profile(uid, "target_university", target)
         db_manager.set_state(uid, "GET_STUDENT_INTENT")
-        return "💖 What is your intent?\n1️⃣ Friends\n2️⃣ Boyfriend\n3️⃣ Girlfriend\n4️⃣ Chills\n5️⃣ Just vibes"
+        return "💖 Your Intent:\n1️⃣ Friends\n2️⃣ Boyfriend\n3️⃣ Girlfriend\n4️⃣ Chills\n5️⃣ Just vibes"
 
     if state == "GET_STUDENT_INTENT":
         intent = STUDENT_INTENTS.get(msg)
-        if not intent:
-            return "❗ Choose 1-5 from the menu above."
-        
+        if not intent: return "❗ Choose 1-5."
         db_manager.update_profile(uid, "intent", intent)
-        db_manager.set_state(uid, "GET_GENDER") 
-        return "Please select your gender:\n• MALE\n• FEMALE"
-    
+        db_manager.set_state(uid, "GET_GENDER")
+        return "Select your gender:\n• MALE\n• FEMALE"
+
+    # -------------------------------------------------
+    # 2. CITIZEN FLOW
+    # Flow: Gender -> Intent -> Age Range -> Their Age -> Name -> Location -> Photo -> Phone
+    # -------------------------------------------------
     if state == "GET_GENDER":
-        if msg_l not in ["male", "female"]: 
-            return "❗ Please type MALE or FEMALE here."
-        
+        if msg_l not in ["male", "female"]: return "❗ Type MALE or FEMALE."
         db_manager.update_profile(uid, "gender", msg_l)
-        preferred = "female" if msg_l == "male" else "male"
-        db_manager.update_profile(uid, "preferred_gender", preferred)
-
-        # RE-FETCH to get the fresh 'user_type'
-        user = db_manager.get_user_by_phone(phone)
-        u_type = user.get("user_type", "CITIZEN")
-
-        if u_type == "STUDENT":
-            db_manager.set_state(uid, "GET_NAME")
-            # --- CRITICAL FIX: RETURN IMMEDIATELY ---
-            return "📝 Great! What is your name?"
+        db_manager.update_profile(uid, "preferred_gender", "female" if msg_l == "male" else "male")
         
-        # --- CITIZEN ONLY LOGIC ---
-        db_manager.set_state(uid, "GET_INTENT")
-        if msg_l == "male":
-            return ("💖 What are you looking for?\n\n"
-                    "1️⃣ Sugar mummy\n"
-                    "4️⃣ Girlfriend\n"
-                    "6️⃣ 1 night stand\n"
-                    "7️⃣ Just vibes\n"
-                    "8️⃣ Friend")
-        else: # female
-            return ("💖 What are you looking for?\n\n"
-                    "2️⃣ Sugar daddy\n"
-                    "3️⃣ Benten\n"
-                    "5️⃣ Boyfriend\n"
-                    "6️⃣ 1 night stand\n"
-                    "7️⃣ Just vibes\n"
-                    "8️⃣ Friend")
+        # Branching Point
+        if user.get("user_type") == "STUDENT":
+            db_manager.set_state(uid, "GET_NAME")
+            return "📝 Great! What is your name?"
+        else:
+            db_manager.set_state(uid, "GET_INTENT")
+            options = ("1️⃣ Sugar mummy\n4️⃣ Girlfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend" if msg_l == "male" 
+                       else "2️⃣ Sugar daddy\n3️⃣ Benten\n5️⃣ Boyfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend")
+            return f"💖 What are you looking for?\n\n{options}"
 
     if state == "GET_INTENT":
-        # Straightforward: Just get the intent from the map. No gender validation.
         intent = INTENT_MAP.get(msg)
-        
-        if not intent:
-            return "❗ Please choose a valid option (1-8)."
-
+        if not intent: return "❗ Choose 1-8."
         db_manager.update_profile(uid, "intent", intent)
         db_manager.set_state(uid, "GET_AGE_RANGE")
         return "🎂 Preferred age range:\n1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
-    
+
     if state == "GET_AGE_RANGE":
         r = AGE_MAP.get(msg)
         if not r: return "❗ Choose 1–6."
         db_manager.update_profile(uid, "age_min", r[0])
         db_manager.update_profile(uid, "age_max", r[1])
-        db_manager.set_state(uid, "GET_NAME")
+        db_manager.set_state(uid, "GET_NAME") # Citizens now join Name flow
         return "📝 What is your name?"
-        
 
+    # -------------------------------------------------
+    # SHARED FINAL STEPS (Differentiated inside)
+    # -------------------------------------------------
     if state == "GET_NAME":
-        if len(msg) < 3 or len(msg) > 20:
-            return "❗ Please enter a valid name (3–20 characters)."
-        
+        if len(msg) < 3: return "❗ Name too short."
         db_manager.update_profile(uid, "name", msg)
-        
-        # Ensure Students have an age range set so matching works
-        user = db_manager.get_user_by_phone(phone)
-        if user.get("user_type") == "STUDENT":
-            db_manager.update_profile(uid, "age_min", 18)
-            db_manager.update_profile(uid, "age_max", 30)
-
         db_manager.set_state(uid, "GET_AGE")
         return "🎂 How old are you?"
-        
+
     if state == "GET_AGE":
-        if not msg.isdigit(): 
-            return "❗ Please enter your age as a number (e.g., 25)."
-        
+        if not msg.isdigit(): return "❗ Enter a number."
         age = int(msg)
-        if age < 18:
-            db_manager.set_state(uid, "NEW")
-            return "❌ Sorry, you must be 18 or older to use this service."
-        if age > 80:
-            return "❗ Please enter a realistic age."
-            
         db_manager.update_profile(uid, "age", age)
-        db_manager.set_state(uid, "GET_LOCATION")
-        return ("📍 *Where are you located?*\n\n"
-                "Please enter your **City and Area**.\n"
-                "Examples:\n"
-                "• Harare, Budiriro\n"
-                "• Bulawayo, Nkulumane\n"
-                "• Mutare, Sakubva")
         
-        
+        if user.get("user_type") == "STUDENT":
+            # STUDENTS SKIP LOCATION -> GO TO PHOTO
+            db_manager.set_state(uid, "GET_PHOTO")
+            return "📸 Send a clear photo of yourself to continue."
+        else:
+            # CITIZENS GO TO LOCATION
+            db_manager.set_state(uid, "GET_LOCATION")
+            return "📍 Where are you located? (City and Suburb)"
+
     if state == "GET_LOCATION":
-        location_input = msg.strip().title()
-        parts = location_input.replace(",", " ").split()
-        
-        if len(parts) < 2:
-            return ("⚠️ *Please be more specific.*\n\n"
-                    "We need your **City and Suburb** to find matches near you (e.g., Harare CBD or Harare Ruwa).")
-
-
         db_manager.update_profile(uid, "location", msg)
         db_manager.set_state(uid, "GET_PHOTO")
-        return "Almost done! Please send a clear photo of yourself."
+        return "📸 Send a clear photo of yourself to continue."
     
     if state == "GET_PHOTO":
         if msg_l == "skip":
