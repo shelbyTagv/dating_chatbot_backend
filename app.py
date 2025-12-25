@@ -253,7 +253,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             return ("👋 Welcome to Shelby Dating Connections!\n\n"
                     "Looking for Love, or just vibes: we got you covered. "
                     "Sending pictures is mandatory (you can skip by typing 'skip').\n\n"
-                    "Please select your gender:\n• MALE\n• FEMALE")
+                    "Please select your gender:\n1️⃣ MALE\n2️⃣ FEMALE")
         else:
             # If they are NEW and send something else, just prompt them to start
             return "👋 Welcome! Please type *HELLO* or *HI* to start finding matches."
