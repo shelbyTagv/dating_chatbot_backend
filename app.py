@@ -270,7 +270,11 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
             db_manager.update_profile(uid, "user_type", "STUDENT")
             db_manager.set_state(uid, "GET_UNIVERSITY")
             return f"🎓 Which University are you at?\nValid: {', '.join(ZIM_UNIVERSITIES)}"
-        # ... (Citizen logic) ...
+        elif msg == "2":
+            db_manager.update_profile(uid, "user_type", "CITIZEN")
+            db_manager.set_state(uid, "GET_GENDER") # Citizens go to Gender THEN Intent
+            return "Please select your gender:\n• MALE\n• FEMALE"
+        return "❗ Please choose 1 or 2."
 
     if state == "GET_UNIVERSITY":
         uni = msg.upper().strip()
@@ -292,8 +296,9 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         intent = STUDENT_INTENTS.get(msg)
         if not intent:
             return "❗ Choose 1-5 from the menu above."
+        
         db_manager.update_profile(uid, "intent", intent)
-        db_manager.set_state(uid, "GET_GENDER") # Join back to the main flow for age/gender
+        db_manager.set_state(uid, "GET_GENDER") 
         return "Please select your gender:\n• MALE\n• FEMALE"
     
     if state == "GET_GENDER":
@@ -304,17 +309,16 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         preferred = "female" if msg_l == "male" else "male"
         db_manager.update_profile(uid, "preferred_gender", preferred)
 
-        # --- FIX: BRANCHING LOGIC BASED ON USER TYPE ---
-        user_type = user.get("user_type", "CITIZEN")
+        # IMPORTANT: Refresh user data from DB to get the latest 'user_type'
+        user = db_manager.get_user_by_phone(phone)
+        u_type = user.get("user_type", "CITIZEN")
 
-        if user_type == "STUDENT":
-            # Students already chose intent in GET_STUDENT_INTENT
-            # Send them straight to GET_NAME
+        if u_type == "STUDENT":
+            # SKIP the citizen intent menu
             db_manager.set_state(uid, "GET_NAME")
-            return "📝 Perfect! What is your name?"
-        
+            return "📝 Great! What is your name?"
         else:
-            # Citizens need to see the general intent menu
+            # PROCEED to citizen intent menu
             db_manager.set_state(uid, "GET_INTENT")
             if msg_l == "male":
                 return ("💖 What are you looking for?\n\n"
