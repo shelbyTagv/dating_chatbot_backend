@@ -246,34 +246,18 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
     if msg_l == "exit": db_manager.set_state(uid, "NEW"); return "❌ Ended. Type *HELLO* to start."
 
     if state == "NEW":
-        if msg_l in ["hello", "hi", "hey"]:
+        # Check if the user is saying a valid greeting to start registration
+        if msg_l in ["hello", "hi", "hey", "hie"]:
             db_manager.reset_profile(uid)
-            db_manager.set_state(uid, "CHOOSE_USER_TYPE")
-            return ("👋 Welcome to Shelby Dating!\n\n"
-                    "Please select who you are:\n"
-                    "1️⃣ University Student (Campus Dating)\n"
-                    "2️⃣ Zimbabwean Citizen (General Dating)")
-
-    if state == "CHOOSE_USER_TYPE":
-        if msg == "1":
-            db_manager.update_profile(uid, "user_type", "STUDENT")
-            db_manager.set_state(uid, "GET_UNIVERSITY")
-            return "🎓 Which University are you currently enrolled in? (e.g. UZ, MSU, NUST, CUT)"
-        elif msg == "2":
-            db_manager.update_profile(uid, "user_type", "CITIZEN")
-            db_manager.set_state(uid, "GET_GENDER") # Sends to original flow
-            return "Please select your gender:\n• MALE\n• FEMALE"
-        return "❗ Please choose 1 or 2."
-
-    if state == "GET_UNIVERSITY":
-        db_manager.update_profile(uid, "university", msg.upper())
-        db_manager.set_state(uid, "GET_TARGET_UNIVERSITY")
-        return "🎯 Which University are you targeting? (Type 'Any' or a specific Uni name)"
-
-    if state == "GET_TARGET_UNIVERSITY":
-        db_manager.update_profile(uid, "target_university", msg.upper())
-        db_manager.set_state(uid, "GET_GENDER")
-        return "Please select your gender:\n• MALE\n• FEMALE"
+            db_manager.set_state(uid, "GET_GENDER")
+            return ("👋 Welcome to Shelby Dating Connections!\n\n"
+                    "Looking for Love, or just vibes: we got you covered. "
+                    "Sending pictures is mandatory (you can skip by typing 'skip').\n\n"
+                    "Please select your gender:\n• MALE\n• FEMALE")
+        else:
+            # If they are NEW and send something else, just prompt them to start
+            return "👋 Welcome! Please type *HELLO* or *HI* to start finding matches."
+    
     if state == "GET_GENDER":
         if msg_l not in ["male", "female"]: 
             return "❗ Please type MALE or FEMALE here."
@@ -404,7 +388,7 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
                 reply = "🔥 *Matches Found!* 🔥\n"
                 for m in matches: 
                     reply += f"• {m['name']} — {m['location']}\n"
-                reply += "\nSelect Currency:\n1️⃣ USD ($1.00)\n2️⃣ ZiG (40 ZiG)"
+                reply += "\nSelect Currency:\n1️⃣ USD ($2.00)\n2️⃣ ZiG (80 ZiG)"
                 return reply
             else:
                 # ADDED CHANNEL LINK HERE
@@ -467,8 +451,8 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         return ("\n✨ *Unlock all details and contact numbers!*\n\n"
                 "Select Currency to continue:\n"
-                "1️⃣ USD ($1.00)\n"
-                "2️⃣ ZiG (40 ZiG)\n\n"
+                "1️⃣ USD ($2.00)\n"
+                "2️⃣ ZiG (80 ZiG)\n\n"
                 )
 
     if state == "CHOOSE_CURRENCY":
@@ -486,13 +470,13 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
         
         # Determine parameters based on state
         if state == "AWAITING_ECOCASH_USD":
-            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
+            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 2.00)
             method_name = "EcoCash USD"
         elif state == "AWAITING_ECOCASH_ZIG":
-            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00) # Updated to ZWG
+            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 80.00) # Updated to ZWG
             method_name = "EcoCash ZiG"
         else:
-            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
+            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 2.00)
             method_name = "InnBucks"
 
         if success:
