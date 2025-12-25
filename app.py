@@ -12,6 +12,10 @@ from pesepay import Pesepay  #
 import re
 import db_manager
 
+
+import openai
+
+
 # -------------------------------------------------
 # APP & CONFIG
 # -------------------------------------------------
@@ -215,253 +219,185 @@ def send_whatsapp_image(phone: str, image_path: str, caption: str):
 # CHAT HANDLER
 # -------------------------------------------------
 
+# ---------------------------------------------------------
+# HELPER: PHOTO EXTRACTION
+# ---------------------------------------------------------
+def get_photo_link(payload):
+    msg_data = payload.get("messageData", {})
+    return (msg_data.get("imageMessageData", {}).get("fileId") or 
+            msg_data.get("fileMessageData", {}).get("downloadUrl") or
+            msg_data.get("imageMessageData", {}).get("downloadUrl"))
+
+# ---------------------------------------------------------
+# 1. STUDENT FLOW (Uni -> Target -> Intent -> Gender -> Name -> Photo)
+# ---------------------------------------------------------
+def handle_student_flow(uid, state, msg, msg_l, payload):
+    if state == "ST_UNI":
+        uni = msg.upper().strip()
+        if uni not in ZIM_UNIVERSITIES: return f"❗ Valid Unis: {', '.join(ZIM_UNIVERSITIES[:5])}..."
+        db_manager.update_profile(uid, "university", uni)
+        db_manager.set_state(uid, "ST_TARGET")
+        return "🎯 Which University are you targeting for matches?"
+
+    if state == "ST_TARGET":
+        target = msg.upper().strip()
+        if target not in ZIM_UNIVERSITIES: return "❗ Enter a valid University abbreviation."
+        db_manager.update_profile(uid, "target_university", target)
+        db_manager.set_state(uid, "ST_INTENT")
+        return "💖 Your Intent:\n1️⃣ Friends\n2️⃣ Boyfriend\n3️⃣ Girlfriend\n4️⃣ Chills\n5️⃣ Just vibes"
+
+    if state == "ST_INTENT":
+        intent = STUDENT_INTENTS.get(msg)
+        if not intent: return "❗ Choose 1-5."
+        db_manager.update_profile(uid, "intent", intent)
+        db_manager.set_state(uid, "ST_GENDER")
+        return "Select your gender:\n• MALE\n• FEMALE"
+
+    if state == "ST_GENDER":
+        if msg_l not in ["male", "female"]: return "❗ Type MALE or FEMALE."
+        db_manager.update_profile(uid, "gender", msg_l)
+        db_manager.update_profile(uid, "preferred_gender", "female" if msg_l == "male" else "male")
+        db_manager.set_state(uid, "ST_NAME")
+        return "📝 Great! What is your name?"
+
+    if state == "ST_NAME":
+        db_manager.update_profile(uid, "name", msg)
+        db_manager.set_state(uid, "ST_PHOTO")
+        return "📸 Almost done! Send a photo of yourself (or type *SKIP*):"
+
+    if state == "ST_PHOTO":
+        photo_link = get_photo_link(payload)
+        if photo_link or msg_l == "skip":
+            db_manager.update_profile(uid, "picture", photo_link)
+            db_manager.set_state(uid, "GET_PHONE")
+            return "✅ Photo saved! 📞 Enter your WhatsApp number (e.g. 077...):"
+        return "❗ Please send an image or type *SKIP*."
+
+# ---------------------------------------------------------
+# 2. CITIZEN FLOW (Gender -> Intent -> Age Range -> Age -> Name -> Loc -> Photo)
+# ---------------------------------------------------------
+def handle_citizen_flow(uid, state, msg, msg_l, payload):
+    if state == "CT_GENDER":
+        if msg_l not in ["male", "female"]: return "❗ Type MALE or FEMALE."
+        db_manager.update_profile(uid, "gender", msg_l)
+        db_manager.update_profile(uid, "preferred_gender", "female" if msg_l == "male" else "male")
+        db_manager.set_state(uid, "CT_INTENT")
+        opts = "1️⃣ Sugar mummy\n4️⃣ Girlfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend" if msg_l == "male" else "2️⃣ Sugar daddy\n3️⃣ Benten\n5️⃣ Boyfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend"
+        return f"💖 What are you looking for?\n\n{opts}"
+
+    if state == "CT_INTENT":
+        intent = INTENT_MAP.get(msg)
+        if not intent: return "❗ Choose 1-8."
+        db_manager.update_profile(uid, "intent", intent)
+        db_manager.set_state(uid, "CT_AGE_RANGE")
+        return "🎂 Preferred age range:\n1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
+
+    if state == "CT_AGE_RANGE":
+        r = AGE_MAP.get(msg)
+        if not r: return "❗ Choose 1-6."
+        db_manager.update_profile(uid, "age_min", r[0])
+        db_manager.update_profile(uid, "age_max", r[1])
+        db_manager.set_state(uid, "CT_AGE_OWN")
+        return "🎂 How old are you?"
+
+    if state == "CT_AGE_OWN":
+        if not msg.isdigit(): return "❗ Enter a number."
+        db_manager.update_profile(uid, "age", int(msg))
+        db_manager.set_state(uid, "CT_NAME")
+        return "📝 What is your name?"
+
+    if state == "CT_NAME":
+        db_manager.update_profile(uid, "name", msg)
+        db_manager.set_state(uid, "CT_LOCATION")
+        return "📍 Where are you located? (City and Suburb)"
+
+    if state == "CT_LOCATION":
+        db_manager.update_profile(uid, "location", msg)
+        db_manager.set_state(uid, "CT_PHOTO")
+        return "📸 Almost done! Send a photo of yourself (or type *SKIP*):"
+
+    if state == "CT_PHOTO":
+        photo_link = get_photo_link(payload)
+        if photo_link or msg_l == "skip":
+            db_manager.update_profile(uid, "picture", photo_link)
+            db_manager.set_state(uid, "GET_PHONE")
+            return "✅ Photo saved! 📞 Enter your WhatsApp number (e.g. 077...):"
+        return "❗ Please send an image or type *SKIP*."
+
+# ---------------------------------------------------------
+# 3. MAIN ROUTER & SHARED STATES
+# ---------------------------------------------------------
 def handle_message(phone: str, text: str, payload: dict) -> str:
     msg = text.strip() if text else ""
     msg_l = msg.lower()
-    
-    # 1. User Initialization
     user = db_manager.get_user_by_phone(phone)
-    if not user: 
-        user = db_manager.create_new_user(phone)
+    if not user: user = db_manager.create_new_user(phone)
     uid = user["id"]
     db_manager.ensure_profile(uid)
-    
-    # 2. Global Commands
-    if msg_l == "exit": 
+    state = user.get("chat_state", "NEW")
+
+    if msg_l == "exit":
         db_manager.set_state(uid, "NEW")
         return "❌ Session ended. Type *HELLO* to start over."
 
     if msg_l == "profile":
         profile = db_manager.get_profile(uid)
-        if not profile or not profile.get("name"):
-            return "❌ Profile incomplete. Type *HELLO* to start."
-        caption = (f"👤 *YOUR PROFILE*\n━━━━━━━━━━━━━━━\n"
-                   f"📝 Name: {profile['name']}\n"
-                   f"🎂 Age: {profile['age']}\n"
-                   f"📍 Location/Uni: {profile.get('university') or profile.get('location')}\n"
-                   f"💖 Looking for: {profile.get('intent')}")
+        if not profile or not profile.get("name"): return "❌ Profile incomplete."
+        caption = f"👤 *PROFILE*\nName: {profile['name']}\nAge: {profile['age']}\nLoc/Uni: {profile.get('university') or profile.get('location')}"
         if profile.get("picture"):
             send_whatsapp_image(phone, profile["picture"], caption)
             return ""
         return caption
 
-    state = user.get("chat_state", "NEW")
-
-    # -------------------------------------------------
-    # STARTING FLOW
-    # -------------------------------------------------
+    # --- ENTRY ---
     if state == "NEW":
         if msg_l in ["hello", "hi", "hey"]:
             db_manager.reset_profile(uid)
             db_manager.set_state(uid, "CHOOSE_USER_TYPE")
-            return ("👋 Welcome to Shelby Dating!\n\n"
-                    "Please select who you are:\n"
-                    "1️⃣ University Student (Campus Dating)\n"
-                    "2️⃣ Zimbabwean Citizen (General Dating)")
-        return "👋 Type *HELLO* to start finding matches."
+            return "👋 Welcome!\n1️⃣ University Student\n2️⃣ Zimbabwean Citizen"
+        return "👋 Type *HELLO* to start."
 
     if state == "CHOOSE_USER_TYPE":
         if msg == "1":
             db_manager.update_profile(uid, "user_type", "STUDENT")
-            db_manager.set_state(uid, "GET_UNIVERSITY")
-            return f"🎓 Which University are you at?\nValid: {', '.join(ZIM_UNIVERSITIES)}"
+            db_manager.set_state(uid, "ST_UNI")
+            return "🎓 Which University are you at?"
         elif msg == "2":
             db_manager.update_profile(uid, "user_type", "CITIZEN")
-            db_manager.set_state(uid, "GET_GENDER")
+            db_manager.set_state(uid, "CT_GENDER")
             return "Please select your gender:\n• MALE\n• FEMALE"
-        return "❗ Please choose 1 or 2."
+        return "❗ Choose 1 or 2."
 
-    # -------------------------------------------------
-    # 1. STUDENT FLOW
-    # Flow: Uni -> Target Uni -> Intent -> Gender -> Name -> Photo -> Phone
-    # -------------------------------------------------
-    if state == "GET_UNIVERSITY":
-        uni = msg.upper().strip()
-        if uni not in ZIM_UNIVERSITIES:
-            return f"❗ Use a valid abbreviation: {', '.join(ZIM_UNIVERSITIES[:5])}..."
-        db_manager.update_profile(uid, "university", uni)
-        db_manager.set_state(uid, "GET_TARGET_UNIVERSITY")
-        return "🎯 Which University are you targeting for matches?"
+    # --- BRANCHING ---
+    u_type = user.get("user_type")
+    if u_type == "STUDENT" and state.startswith("ST_"):
+        return handle_student_flow(uid, state, msg, msg_l, payload)
+    if u_type == "CITIZEN" and state.startswith("CT_"):
+        return handle_citizen_flow(uid, state, msg, msg_l, payload)
 
-    if state == "GET_TARGET_UNIVERSITY":
-        target = msg.upper().strip()
-        if target not in ZIM_UNIVERSITIES:
-             return "❗ Enter a valid University abbreviation (e.g., UZ, HIT)."
-        db_manager.update_profile(uid, "target_university", target)
-        db_manager.set_state(uid, "GET_STUDENT_INTENT")
-        return "💖 Your Intent:\n1️⃣ Friends\n2️⃣ Boyfriend\n3️⃣ Girlfriend\n4️⃣ Chills\n5️⃣ Just vibes"
-
-    if state == "GET_STUDENT_INTENT":
-        intent = STUDENT_INTENTS.get(msg)
-        if not intent: return "❗ Choose 1-5."
-        db_manager.update_profile(uid, "intent", intent)
-        db_manager.set_state(uid, "GET_GENDER")
-        return "Select your gender:\n• MALE\n• FEMALE"
-
-    # -------------------------------------------------
-    # 2. CITIZEN FLOW
-    # Flow: Gender -> Intent -> Age Range -> Their Age -> Name -> Location -> Photo -> Phone
-    # -------------------------------------------------
-    if state == "GET_GENDER":
-        if msg_l not in ["male", "female"]: return "❗ Type MALE or FEMALE."
-        db_manager.update_profile(uid, "gender", msg_l)
-        db_manager.update_profile(uid, "preferred_gender", "female" if msg_l == "male" else "male")
-        
-        # Branching Point
-        if user.get("user_type") == "STUDENT":
-            db_manager.set_state(uid, "GET_NAME")
-            return "📝 Great! What is your name?"
-        else:
-            db_manager.set_state(uid, "GET_INTENT")
-            options = ("1️⃣ Sugar mummy\n4️⃣ Girlfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend" if msg_l == "male" 
-                       else "2️⃣ Sugar daddy\n3️⃣ Benten\n5️⃣ Boyfriend\n6️⃣ 1 night stand\n7️⃣ Just vibes\n8️⃣ Friend")
-            return f"💖 What are you looking for?\n\n{options}"
-
-    if state == "GET_INTENT":
-        intent = INTENT_MAP.get(msg)
-        if not intent: return "❗ Choose 1-8."
-        db_manager.update_profile(uid, "intent", intent)
-        db_manager.set_state(uid, "GET_AGE_RANGE")
-        return "🎂 Preferred age range:\n1️⃣ 18–25\n2️⃣ 26–30\n3️⃣ 31–35\n4️⃣ 36–40\n5️⃣ 41–50\n6️⃣ 50+"
-
-    if state == "GET_AGE_RANGE":
-        r = AGE_MAP.get(msg)
-        if not r: return "❗ Choose 1–6."
-        db_manager.update_profile(uid, "age_min", r[0])
-        db_manager.update_profile(uid, "age_max", r[1])
-        db_manager.set_state(uid, "GET_NAME") # Citizens now join Name flow
-        return "📝 What is your name?"
-
-    # -------------------------------------------------
-    # SHARED FINAL STEPS (Differentiated inside)
-    # -------------------------------------------------
-    if state == "GET_NAME":
-        if len(msg) < 3: return "❗ Name too short."
-        db_manager.update_profile(uid, "name", msg)
-        db_manager.set_state(uid, "GET_AGE")
-        return "🎂 How old are you?"
-
-    if state == "GET_AGE":
-        if not msg.isdigit(): return "❗ Enter a number."
-        age = int(msg)
-        db_manager.update_profile(uid, "age", age)
-        
-        if user.get("user_type") == "STUDENT":
-            # STUDENTS SKIP LOCATION -> GO TO PHOTO
-            db_manager.set_state(uid, "GET_PHOTO")
-            return "📸 Send a clear photo of yourself to continue."
-        else:
-            # CITIZENS GO TO LOCATION
-            db_manager.set_state(uid, "GET_LOCATION")
-            return "📍 Where are you located? (City and Suburb)"
-
-    if state == "GET_LOCATION":
-        db_manager.update_profile(uid, "location", msg)
-        db_manager.set_state(uid, "GET_PHOTO")
-        return "📸 Send a clear photo of yourself to continue."
-    
-    if state == "GET_PHOTO":
-        if msg_l == "skip":
-            db_manager.update_profile(uid, "picture", None)
-            db_manager.set_state(uid, "GET_PHONE")
-            return "⏩ Photo skipped. 📞 Now, enter the phone number where matches can contact you:"
-
-        msg_data = payload.get("messageData", {})
-        file_data = msg_data.get("fileMessageData", {})
-        image_data = msg_data.get("imageMessageData", {})
-        
-        # 1. Try to get the ID or the URL (Green API sometimes sends one or the other)
-        # Based on your logs, your instance is sending 'downloadUrl' inside 'fileMessageData'
-        photo_link = (
-            image_data.get("fileId") or 
-            file_data.get("downloadUrl") or 
-            image_data.get("downloadUrl")
-        )
-
-        if photo_link:
-            db_manager.update_profile(uid, "picture", photo_link)
-            db_manager.set_state(uid, "GET_PHONE")
-            return "✅ Photo received! 📞 Finally, enter the phone number where matches can contact you (e.g., 0772111222):"
-        
-        # If we reach here, it means no link was found
-        return "I saw your message, but I couldn't process the photo. Please try sending it again as a standard gallery image."
-    
-
-    # 1. UPDATED AWAITING_MATCHES STATE
-    if state == "AWAITING_MATCHES":
-        if msg_l == "status":
-            matches = db_manager.get_matches(uid)
-            if matches:
-                db_manager.set_state(uid, "CHOOSE_CURRENCY")
-                reply = "🔥 *Matches Found!* 🔥\n"
-                for m in matches: 
-                    reply += f"• {m['name']} — {m['location']}\n"
-                reply += "\nSelect Currency:\n1️⃣ USD ($1.00)\n2️⃣ ZiG (40 ZiG)"
-                return reply
-            else:
-                # ADDED CHANNEL LINK HERE
-                return ("⏳ Still looking for matches that fit your profile...\n\n"
-    
-                        "Check back here later by typing *STATUS*.")
-
-        if msg_l == "exit":
-            db_manager.reset_profile(uid)
-            db_manager.set_state(uid, "GET_GENDER")
-            return "👋 Profile cleared. Let's start over!\n\nPlease select your gender:\n• MALE\n• FEMALE"
-
-        return "🔍 You are currently waiting for matches. Type *STATUS* to check again or *EXIT* to redo your profile."
-
-   # 2. UPDATED GET_PHONE STATE (The Preview Logic)
+    # --- MERGED END (PAYMENT & MATCHES) ---
     if state == "GET_PHONE":
         clean_num = msg.strip().replace(" ", "").replace("+263", "0")
-        if not is_valid_zim_phone(clean_num):
-            return "❗ Invalid number. Please enter a Zimbabwean number (e.g., 0772123456)."
-
+        if not is_valid_zim_phone(clean_num): return "❗ Invalid Zim number."
         db_manager.update_profile(uid, "contact_phone", msg)
-
-        # --- NEW: ALERT THE CHANNEL ---
-        # Fetch the newly completed profile info
-        new_prof = db_manager.get_profile(uid)
-        if new_prof:
-            send_channel_alert(
-                new_prof['name'], 
-                new_prof['age'], 
-                new_prof['location'], 
-                new_prof['intent'], 
-                new_prof['picture']
-            )
-        # ------------------------------
-
+        
+        # Alert Channel
+        prof = db_manager.get_profile(uid)
+        send_channel_alert(prof['name'], prof['age'], prof.get('university') or prof.get('location'), prof['intent'], prof['picture'])
 
         matches = db_manager.get_matches(uid)
+        if not matches:
+            db_manager.set_state(uid, "AWAITING_MATCHES")
+            return "✅ Profile saved! No matches yet. Type *STATUS* later."
 
-        if not matches: 
-            db_manager.set_state(uid, "AWAITING_MATCHES") 
-        
-            return ("✅ Profile saved! We couldn't find matches right now.\n\n"
-            
-                    "Type *STATUS* here later to check again.")
-        
-        send_whatsapp_message(phone, "🔥 *Matches Found!* Here is a preview of people looking for you:")
-
+        send_whatsapp_message(phone, "🔥 *Matches Found!* Previews:")
         for m in matches[:3]:
-            preview_caption = (f"👤 *Name:* {m['name']}\n"
-                               f"🎂 *Age:* {m['age']}\n"
-                               f"📍 *Location:* {m['location']}\n"
-                               f"📞 *Contact:* [Locked 🔒 Pay to View]")
+            cap = f"👤 {m['name']}\n🎂 {m['age']}\n📍 {m['location']}\n📞 [Locked 🔒]"
+            if m.get('picture'): send_whatsapp_image(phone, m['picture'], cap)
+            else: send_whatsapp_message(phone, cap)
             
-            if m.get('picture'):
-                send_whatsapp_image(phone, m['picture'], preview_caption)
-            else:
-                send_whatsapp_message(phone, preview_caption)
-    
         db_manager.set_state(uid, "CHOOSE_CURRENCY")
-        
-        return ("\n✨ *Unlock all details and contact numbers!*\n\n"
-                "Select Currency to continue:\n"
-                "1️⃣ USD ($1.00)\n"
-                "2️⃣ ZiG (40 ZiG)\n\n"
-                )
+        return "✨ Unlock all numbers:\n1️⃣ USD ($1.00)\n2️⃣ ZiG (40 ZiG)"
 
     if state == "CHOOSE_CURRENCY":
         if msg == "1": db_manager.set_state(uid, "CHOOSE_METHOD_USD"); return "USD Method:\n1️⃣ EcoCash\n2️⃣ InnBucks"
@@ -475,50 +411,28 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 
     if state in ["AWAITING_ECOCASH_USD", "AWAITING_ECOCASH_ZIG", "AWAITING_INNBUCKS_USD"]:
         clean_num = msg.strip().replace("+263", "0").replace("263", "0")
-        
-        # Determine parameters based on state
-        if state == "AWAITING_ECOCASH_USD":
-            success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
-            method_name = "EcoCash USD"
-        elif state == "AWAITING_ECOCASH_ZIG":
-            success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00) # Updated to ZWG
-            method_name = "EcoCash ZiG"
-        else:
-            success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
-            method_name = "InnBucks"
+        if state == "AWAITING_ECOCASH_USD": success = create_pesepay_payment(uid, clean_num, "PZW211", "USD", 1.00)
+        elif state == "AWAITING_ECOCASH_ZIG": success = create_pesepay_payment(uid, clean_num, "PZW201", "ZWG", 40.00)
+        else: success = create_pesepay_payment(uid, clean_num, "PZW212", "USD", 1.00)
 
         if success:
             db_manager.set_state(uid, "PAYMENT_PENDING")
-            
-            # --- CUSTOM SUCCESS MESSAGE ---
-            return (
-                f"🚀 *Payment Initiated via {method_name}!*\n\n"
-                f"📲 Please check the phone for **{clean_num}** right now. "
-                "A prompt will appear asking for your **PIN**.\n\n"
-                "⏳ *What to do next:*\n"
-                "1. On the phone, Enter your PIN carefully.\n"
-                "2. Wait patiently while we process the transaction.\n"
-                "3. This usually takes **less than 3 minutes**.\n\n"
-                "✅ Once confirmed, your matches will be sent automatically to this chat! "
-                "You can also type *STATUS* to check manually."
-            )
-        
-        return "❌ Error sending prompt. Please check your number and try again."
+            return "🚀 Prompt sent! Enter your PIN on your phone and wait. Type *STATUS* to check manually."
+        return "❌ Error sending prompt. Check number and try again."
 
     if state == "PAYMENT_PENDING":
         if msg_l == "status":
             pending = db_manager.get_pending_payments_for_user(uid)
-            if not pending: return "❌ No active payment. Type *HELLO*."
+            if not pending: return "❌ No active payment."
             res = pesepay.poll_transaction(pending[0]['poll_url'])
             if res.success and res.paid:
                 process_successful_payment(uid, pending[0]['reference'])
-                return "✅ Verified! Sending matches..."
-            return "⏳ Not paid yet. Enter PIN and type *STATUS* again."
+                return "✅ Verified! Matches incoming..."
+            return "⏳ Not paid. Enter PIN and type *STATUS* again."
         return "⏳ Waiting for PIN. Type *STATUS* to check."
 
-    # This is the final fallback for any unrecognized message or state
     db_manager.set_state(uid, "NEW")
-    return "❗ Chat ended:Please type *HELLO* or *HI* to start finding matches."
+    return "❗ Chat ended. Type *HELLO* to restart."
 
 
 
@@ -526,8 +440,6 @@ def handle_message(phone: str, text: str, payload: dict) -> str:
 # WEBHOOK ENDPOINT
 # -------------------------------------------------
 
-import openai
-from fastapi.responses import JSONResponse
 
 # Add your OpenAI Key to your .env file
 openai.api_key = os.getenv("OPENAI_API_KEY")
