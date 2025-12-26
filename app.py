@@ -20,23 +20,29 @@ def send_text(phone, text):
     return res
 
 def send_list(phone, title, text, button_text, rows):
-    url = f"{BASE_URL}/sendListMessage/{API_TOKEN}"
+    # This uses the 'sendInteractiveButtons' method which is more stable
+    url = f"{BASE_URL}/sendInteractiveButtons/{API_TOKEN}"
+    
+    # We turn your rows into 'reply' buttons
+    # Note: WhatsApp official limit is 3 buttons. For 4+ options, we use text.
+    buttons = []
+    for i, row in enumerate(rows[:3]): # Takes first 3 options as buttons
+        buttons.append({
+            "type": "reply",
+            "buttonId": f"id_{i}",
+            "buttonText": row['title']
+        })
+
     payload = {
         "chatId": f"{phone}@c.us",
-        "message": text,
-        "title": title,
-        "buttonText": button_text,
-        "sections": [{"title": "Select an Option", "rows": rows}]
+        "header": title,
+        "body": text,
+        "footer": "MicroHub Assistant",
+        "buttons": buttons
     }
-    res = requests.post(url, json=payload)
     
-    # FALLBACK: If List Message fails (403), send as plain text
-    if res.status_code != 200:
-        print("⚠️ List Message Failed. Falling back to text.")
-        fallback_text = f"*{title}*\n{text}\n\nReply with your choice:\n"
-        for row in rows:
-            fallback_text += f"• {row['title']}\n"
-        send_text(phone, fallback_text)
+    res = requests.post(url, json=payload)
+    print(f"OUTGOING BUTTONS [{res.status_code}]: {res.text}")
     return res
 
 # --- CHATBOT LOGIC ---
@@ -46,14 +52,23 @@ def handle_message(phone, msg, sender_name, payload):
     if not user: user = db_manager.create_user(phone)
     uid, state = user['id'], user['chat_state']
 
-    # RESET COMMAND
-    if msg.lower() == "reset":
-        db_manager.update_user(uid, "chat_state", "START")
-        state = "START"
+    # START: Send the 'View Menu' button
+    if state == "START" or msg.lower() in ["hi", "hello"]:
+        db_manager.update_user(uid, "chat_state", "AWAITING_MENU_CLICK")
+        
+        # This sends one single button that says 'View Menu'
+        url = f"{BASE_URL}/sendInteractiveButtons/{API_TOKEN}"
+        payload = {
+            "chatId": f"{phone}@c.us",
+            "body": f"Welcome to Microhub, {sender_name}! How can we help you today?",
+            "buttons": [{"type": "reply", "buttonId": "main_menu", "buttonText": "View Menu"}]
+        }
+        requests.post(url, json=payload)
 
-    if state == "START" or msg.lower() in ["hi", "hello", "menu"]:
+    # When they click 'View Menu', pop up the product list
+    elif state == "AWAITING_MENU_CLICK" and "View Menu" in msg:
         db_manager.update_user(uid, "chat_state", "MAIN_MENU")
-        send_list(phone, "MicroHub", f"Welcome {sender_name}!", "View Menu", [
+        send_list(phone, "Our Services", "Choose an option below:", "Select", [
             {"title": "Product Catalogue"},
             {"title": "Contact Us"},
             {"title": "FAQs"}
