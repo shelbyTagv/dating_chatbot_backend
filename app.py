@@ -8,14 +8,19 @@ app = FastAPI()
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN = os.getenv("API_TOKEN_INSTANCE")
 URL = f"https://api.greenapi.com/waInstance{ID_INSTANCE}"
+BASE_URL = f"https://api.greenapi.com/waInstance{ID_INSTANCE}"
 
 # --- Green API Helpers ---
 
 def send_text(phone, text):
-    requests.post(f"{URL}/sendMessage/{API_TOKEN}", json={"chatId": f"{phone}@c.us", "message": text})
+    url = f"{BASE_URL}/sendMessage/{API_TOKEN}"
+    payload = {"chatId": f"{phone}@c.us", "message": text}
+    response = requests.post(url, json=payload)
+    print(f"DEBUG: Outgoing Text Status: {response.status_code}, Response: {response.text}")
+    return response
 
 def send_list(phone, title, text, button_text, rows):
-    """Sends a WhatsApp Modal/List"""
+    url = f"{BASE_URL}/sendListMessage/{API_TOKEN}"
     payload = {
         "chatId": f"{phone}@c.us",
         "message": text,
@@ -23,7 +28,9 @@ def send_list(phone, title, text, button_text, rows):
         "buttonText": button_text,
         "sections": [{"title": "Select an Option", "rows": rows}]
     }
-    requests.post(f"{URL}/sendListMessage/{API_TOKEN}", json=payload)
+    response = requests.post(url, json=payload)
+    print(f"DEBUG: Outgoing List Status: {response.status_code}, Response: {response.text}")
+    return response
 
 def send_buttons(phone, text, buttons):
     """Sends simple interaction buttons"""
@@ -42,17 +49,17 @@ def handle_message(phone, msg, sender_name, payload):
     uid = user['id']
     state = user['chat_state']
 
-    # 1. Main Welcome
-    if state == "START":
+    # Logic for Welcome Message
+    if state == "START" or msg.lower() in ["hi", "hello", "hey"]:
         db_manager.update_user(uid, "chat_state", "MAIN_MENU")
         send_list(phone, "MicroHub Virtual Assistant", 
                   f"Good afternoon {sender_name}, how can we help you today?", 
                   "View Menu", 
                   [
-                      {"title": "Product Catalogue", "description": "View our loans and plans"},
-                      {"title": "Contact Us", "description": "Branch locations"},
-                      {"title": "FAQs", "description": "Common questions"},
-                      {"title": "Let's Chat", "description": "Talk to an agent"}
+                      {"title": "Product Catalogue", "description": "View our loans"},
+                      {"title": "Contact Us", "description": "Our branches"},
+                      {"title": "FAQs", "description": "Questions"},
+                      {"title": "Let's Chat", "description": "Talk to us"}
                   ])
         return
 
@@ -128,56 +135,37 @@ def handle_message(phone, msg, sender_name, payload):
 @app.post("/webhook")
 async def webhook(request: Request):
     try:
-        payload = await request.json()
-        
-        # Log the payload so you can see it in Railway logs
-        print(f"Incoming Webhook: {payload}")
+        data = await request.json()
+        print(f"DEBUG: Full Payload Received: {data}")
 
-        if payload.get("typeWebhook") == "incomingMessageReceived":
-            sender_data = payload.get("senderData", {})
-            msg_data = payload.get("messageData", {})
+        if data.get("typeWebhook") == "incomingMessageReceived":
+            msg_data = data.get("messageData", {})
+            sender_data = data.get("senderData", {})
             
-            # 1. Extract the Phone Number and Sender Name
-            chat_id = sender_data.get("chatId", "")
-            phone = chat_id.split("@")[0]
+            phone = sender_data.get("chatId", "").split("@")[0]
             sender_name = sender_data.get("senderName", "Customer")
-
-            # 2. Extract Text from ALL possible WhatsApp message types
-            text = ""
             
-            # Standard Text Message
+            # Logic to extract text from ANY message type (Standard, Extended, or List)
+            text = ""
             if "textMessageData" in msg_data:
                 text = msg_data["textMessageData"].get("textMessage", "")
-            
-            # List/Modal Selection (The "Browse" menu)
-            elif "listResultMessageData" in msg_data:
-                text = msg_data["listResultMessageData"].get("title", "")
-            
-            # Button Click (The "Apply" or "Confirm" buttons)
-            elif "buttonsResultMessageData" in msg_data:
-                # Green API sometimes puts it in 'buttonId' or 'buttonText'
-                text = msg_data["buttonsResultMessageData"].get("buttonText", "")
-            
-            # Extended Text (Links/Captions)
             elif "extendedTextMessageData" in msg_data:
                 text = msg_data["extendedTextMessageData"].get("text", "")
+            elif "listResultMessageData" in msg_data:
+                text = msg_data["listResultMessageData"].get("title", "")
+            elif "buttonsResultMessageData" in msg_data:
+                text = msg_data["buttonsResultMessageData"].get("buttonText", "")
 
-            # 3. Process the logic and get the reply string
+            print(f"DEBUG: Extracted Text: '{text}' from Phone: {phone}")
+
             if text or "fileMessageData" in msg_data:
-                # We pass the payload to handle_message so it can process images/files
-                reply = handle_message(phone, text, sender_name, payload)
+                # This calls your logic and internal send functions
+                handle_message(phone, text, sender_name, data)
                 
-                # 4. CRITICAL: Actually send the reply back to WhatsApp
-                # Note: If handle_message uses send_list or send_buttons internally, 
-                # it might return None. If it returns a string, we send it as text.
-                if reply and isinstance(reply, str):
-                    send_text(phone, reply)
-            
-        return {"status": "success"}
-
+        return {"status": "ok"}
     except Exception as e:
-        print(f"Webhook Error: {e}")
-        return {"status": "error", "message": str(e)}
+        print(f"CRITICAL WEBHOOK ERROR: {e}")
+        return {"status": "error"}
 
 @app.on_event("startup")
 def startup():
