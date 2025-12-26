@@ -25,7 +25,6 @@ def init_db():
     cur.execute("DROP TABLE IF EXISTS applications, users")
     cur.execute("SET FOREIGN_KEY_CHECKS = 1")
 
-    # Users/State Table
     cur.execute("""
         CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
@@ -37,14 +36,13 @@ def init_db():
         )
     """)
 
-    # Loan Applications Table
     cur.execute("""
         CREATE TABLE applications (
             id INT AUTO_INCREMENT PRIMARY KEY,
             user_id INT,
             national_id VARCHAR(30),
             selfie_url TEXT,
-            amount_requested DECIMAL(10,2),
+            amount_requested VARCHAR(50),
             business_desc TEXT,
             status VARCHAR(20) DEFAULT 'PENDING',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
@@ -54,6 +52,7 @@ def init_db():
     c.commit()
     cur.close()
     c.close()
+    print("✅ Database Initialized")
 
 def get_user(phone):
     c = conn()
@@ -76,18 +75,9 @@ def create_user(phone):
 def update_user(uid, field, value):
     c = conn()
     cur = c.cursor()
-    cur.execute(f"UPDATE users SET {field}=%s WHERE id=%s", (value, uid))
-    c.commit()
-    cur.close()
-    c.close()
-
-def save_application(uid, id_num, photo, amt, desc):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("""
-        INSERT INTO applications (user_id, national_id, selfie_url, amount_requested, business_desc)
-        VALUES (%s, %s, %s, %s, %s)
-    """, (uid, id_num, photo, amt, desc))
+    # Safe update using parameterization
+    query = f"UPDATE users SET {field}=%s WHERE id=%s"
+    cur.execute(query, (value, uid))
     c.commit()
     cur.close()
     c.close()
