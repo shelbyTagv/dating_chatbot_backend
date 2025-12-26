@@ -81,3 +81,17 @@ def update_user(uid, field, value):
     c.commit()
     cur.close()
     c.close()
+
+# Add this to your update_user function or ensure your 'users' table has these columns:
+# Columns needed: selfie_url (TEXT), amount (VARCHAR), biz_desc (TEXT)
+
+def save_application(uid, data):
+    c = conn()
+    cur = c.cursor()
+    cur.execute("""
+        INSERT INTO applications (user_id, national_id, selfie_url, amount_requested, business_desc)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (uid, data['id'], data['selfie'], data['amt'], data['desc']))
+    c.commit()
+    cur.close()
+    c.close()
