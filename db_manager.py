@@ -8,7 +8,7 @@ def conn():
     global _pool
     if not _pool:
         _pool = mysql.connector.pooling.MySQLConnectionPool(
-            pool_name="ip4sbps_pool",
+            pool_name="microhub_pool",
             pool_size=10,
             host=os.getenv("MYSQLHOST"),
             user=os.getenv("MYSQLUSER"),
@@ -21,119 +21,73 @@ def conn():
 def init_db():
     c = conn()
     cur = c.cursor()
-    # Drop old dating tables
     cur.execute("SET FOREIGN_KEY_CHECKS = 0")
-    cur.execute("DROP TABLE IF EXISTS profiles, users, payments, documents")
+    cur.execute("DROP TABLE IF EXISTS applications, users")
     cur.execute("SET FOREIGN_KEY_CHECKS = 1")
 
-    # Applicants Table
+    # Users/State Table
     cur.execute("""
-        CREATE TABLE applicants (
+        CREATE TABLE users (
             id INT AUTO_INCREMENT PRIMARY KEY,
             phone VARCHAR(20) UNIQUE,
-            chat_state VARCHAR(50) DEFAULT 'NEW',
-            first_name VARCHAR(100),
-            surname VARCHAR(100),
+            name VARCHAR(100),
+            chat_state VARCHAR(50) DEFAULT 'START',
+            selected_product VARCHAR(50),
+            selected_branch VARCHAR(50)
+        )
+    """)
+
+    # Loan Applications Table
+    cur.execute("""
+        CREATE TABLE applications (
+            id INT AUTO_INCREMENT PRIMARY KEY,
+            user_id INT,
             national_id VARCHAR(30),
-            address TEXT,
-            mode_of_entry VARCHAR(50),
-            cohort VARCHAR(50),
-            email VARCHAR(100),
-            gender VARCHAR(10),
-            highest_qual VARCHAR(100),
-            exp_years INT,
-            level_taught VARCHAR(50),
-            special_needs TEXT,
-            is_paid TINYINT DEFAULT 0,
-            created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-        )
-    """)
-
-    # Documents Table
-    cur.execute("""
-        CREATE TABLE documents (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            applicant_id INT,
-            doc_type VARCHAR(50), -- 'ID', 'O_LEVEL', 'A_LEVEL', 'PROFESSIONAL'
-            file_url TEXT,
-            FOREIGN KEY (applicant_id) REFERENCES applicants(id) ON DELETE CASCADE
-        )
-    """)
-
-    # Payments Table
-    cur.execute("""
-        CREATE TABLE payments (
-            id INT AUTO_INCREMENT PRIMARY KEY,
-            applicant_id INT,
-            reference VARCHAR(50) UNIQUE,
-            poll_url TEXT,
-            amount DECIMAL(10,2),
-            currency VARCHAR(10),
-            paid TINYINT DEFAULT 0,
+            selfie_url TEXT,
+            amount_requested DECIMAL(10,2),
+            business_desc TEXT,
+            status VARCHAR(20) DEFAULT 'PENDING',
             created_at DATETIME DEFAULT CURRENT_TIMESTAMP,
-            FOREIGN KEY (applicant_id) REFERENCES applicants(id) ON DELETE CASCADE
+            FOREIGN KEY (user_id) REFERENCES users(id)
         )
     """)
     c.commit()
     cur.close()
     c.close()
 
-# --- Helpers ---
-def get_applicant(phone):
+def get_user(phone):
     c = conn()
     cur = c.cursor(dictionary=True)
-    cur.execute("SELECT * FROM applicants WHERE phone=%s", (phone,))
+    cur.execute("SELECT * FROM users WHERE phone=%s", (phone,))
     res = cur.fetchone()
     cur.close()
     c.close()
     return res
 
-def create_applicant(phone):
+def create_user(phone):
     c = conn()
     cur = c.cursor()
-    cur.execute("INSERT INTO applicants (phone) VALUES (%s)", (phone,))
+    cur.execute("INSERT INTO users (phone) VALUES (%s)", (phone,))
     c.commit()
     cur.close()
     c.close()
-    return get_applicant(phone)
+    return get_user(phone)
 
-def update_applicant(aid, field, value):
+def update_user(uid, field, value):
     c = conn()
     cur = c.cursor()
-    cur.execute(f"UPDATE applicants SET {field}=%s WHERE id=%s", (value, aid))
-    c.commit()
-    cur.close()
-    c.close()
-
-def save_document(aid, doc_type, url):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("INSERT INTO documents (applicant_id, doc_type, file_url) VALUES (%s, %s, %s)", (aid, doc_type, url))
+    cur.execute(f"UPDATE users SET {field}=%s WHERE id=%s", (value, uid))
     c.commit()
     cur.close()
     c.close()
 
-def set_state(aid, state):
-    update_applicant(aid, "chat_state", state)
-
-def create_payment(aid, ref, poll, amt, curr):
+def save_application(uid, id_num, photo, amt, desc):
     c = conn()
     cur = c.cursor()
-    cur.execute("INSERT INTO payments (applicant_id, reference, poll_url, amount, currency) VALUES (%s, %s, %s, %s, %s)", 
-                (aid, ref, poll, amt, curr))
-    c.commit()
-    cur.close()
-    c.close()
-
-def mark_as_paid(ref):
-    c = conn()
-    cur = c.cursor()
-    cur.execute("UPDATE payments SET paid=1 WHERE reference=%s", (ref,))
-    # Get applicant_id from ref to activate them
-    cur.execute("SELECT applicant_id FROM payments WHERE reference=%s", (ref,))
-    row = cur.fetchone()
-    if row:
-        cur.execute("UPDATE applicants SET is_paid=1 WHERE id=%s", (row[0],))
+    cur.execute("""
+        INSERT INTO applications (user_id, national_id, selfie_url, amount_requested, business_desc)
+        VALUES (%s, %s, %s, %s, %s)
+    """, (uid, id_num, photo, amt, desc))
     c.commit()
     cur.close()
     c.close()
