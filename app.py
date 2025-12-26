@@ -42,6 +42,10 @@ def handle_message(phone, msg, sender_name, payload):
     if not user: user = db_manager.create_user(phone)
     uid, state = user['id'], user['chat_state']
 
+    if msg.lower() in ["exit", "restart", "quit", "00"]:
+        db_manager.update_user(uid, "chat_state", "START")
+        return send_text(phone, "🔄 Session reset. Type 'Hi' to start again.")
+
     # --- MAIN BRANCHES ---
     if state == "START" or msg.lower() in ["hi", "hello", "menu"]:
         db_manager.update_user(uid, "chat_state", "MAIN_MENU")
