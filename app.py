@@ -127,22 +127,57 @@ def handle_message(phone, msg, sender_name, payload):
 
 @app.post("/webhook")
 async def webhook(request: Request):
-    data = await request.json()
-    if data.get("typeWebhook") == "incomingMessageReceived":
-        msg_data = data["messageData"]
-        # Handle different message types (Text vs List Selection)
-        text = ""
-        if "textMessageData" in msg_data:
-            text = msg_data["textMessageData"]["textMessage"]
-        elif "listResultMessageData" in msg_data:
-            text = msg_data["listResultMessageData"]["title"]
-        elif "buttonsResultMessageData" in msg_data:
-            text = msg_data["buttonsResultMessageData"]["buttonText"]
+    try:
+        payload = await request.json()
+        
+        # Log the payload so you can see it in Railway logs
+        print(f"Incoming Webhook: {payload}")
 
-        phone = data["senderData"]["chatId"].split("@")[0]
-        sender = data["senderData"]["senderName"]
-        handle_message(phone, text, sender, data)
-    return {"status": "ok"}
+        if payload.get("typeWebhook") == "incomingMessageReceived":
+            sender_data = payload.get("senderData", {})
+            msg_data = payload.get("messageData", {})
+            
+            # 1. Extract the Phone Number and Sender Name
+            chat_id = sender_data.get("chatId", "")
+            phone = chat_id.split("@")[0]
+            sender_name = sender_data.get("senderName", "Customer")
+
+            # 2. Extract Text from ALL possible WhatsApp message types
+            text = ""
+            
+            # Standard Text Message
+            if "textMessageData" in msg_data:
+                text = msg_data["textMessageData"].get("textMessage", "")
+            
+            # List/Modal Selection (The "Browse" menu)
+            elif "listResultMessageData" in msg_data:
+                text = msg_data["listResultMessageData"].get("title", "")
+            
+            # Button Click (The "Apply" or "Confirm" buttons)
+            elif "buttonsResultMessageData" in msg_data:
+                # Green API sometimes puts it in 'buttonId' or 'buttonText'
+                text = msg_data["buttonsResultMessageData"].get("buttonText", "")
+            
+            # Extended Text (Links/Captions)
+            elif "extendedTextMessageData" in msg_data:
+                text = msg_data["extendedTextMessageData"].get("text", "")
+
+            # 3. Process the logic and get the reply string
+            if text or "fileMessageData" in msg_data:
+                # We pass the payload to handle_message so it can process images/files
+                reply = handle_message(phone, text, sender_name, payload)
+                
+                # 4. CRITICAL: Actually send the reply back to WhatsApp
+                # Note: If handle_message uses send_list or send_buttons internally, 
+                # it might return None. If it returns a string, we send it as text.
+                if reply and isinstance(reply, str):
+                    send_text(phone, reply)
+            
+        return {"status": "success"}
+
+    except Exception as e:
+        print(f"Webhook Error: {e}")
+        return {"status": "error", "message": str(e)}
 
 @app.on_event("startup")
 def startup():
