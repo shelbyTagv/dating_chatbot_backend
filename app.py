@@ -1,12 +1,13 @@
-import os, re, requests, db_manager, openai
+import os, re, requests, db_manager
 from fastapi import FastAPI, Request
+from openai import OpenAI  # <--- Updated Import
 from dotenv import load_dotenv
 
 load_dotenv()
 app = FastAPI()
 
 # --- CONFIGURATION ---
-openai.api_key = os.getenv("OPENAI_API_KEY")
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 ID_INSTANCE = os.getenv("ID_INSTANCE")
 API_TOKEN = os.getenv("API_TOKEN_INSTANCE")
 BASE_URL = f"https://api.greenapi.com/waInstance{ID_INSTANCE}"
@@ -16,15 +17,18 @@ def send_text(phone, text):
     payload = {"chatId": f"{phone}@c.us", "message": text}
     requests.post(url, json=payload)
 
+
+
 def get_ai_faq(query):
     try:
-        # Context-aware system prompt for Microhub
+        # Context-aware system prompt
         system_msg = (
             "You are the Microhub Finance Assistant. Answer questions ONLY about "
             "Loans, Mukando, Solar Systems, and Funeral Plans. If the user asks "
             "something unrelated, say you can only help with Microhub finance."
         )
-        response = openai.ChatCompletion.create(
+        # Updated for OpenAI v1.0.0+
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
                 {"role": "system", "content": system_msg},
@@ -35,6 +39,7 @@ def get_ai_faq(query):
     except Exception as e:
         print(f"OpenAI Error: {e}")
         return "Our AI is currently offline. Please type '4' to speak with an agent."
+
 
 # --- CHATBOT LOGIC ---
 
@@ -138,11 +143,12 @@ def handle_message(phone, msg, sender_name, payload):
 
 # --- WEBHOOK ENDPOINT (THE FIX IS HERE) ---
 
+# --- WEBHOOK ENDPOINT ---
 @app.post("/webhook")
 async def webhook(request: Request):
     data = await request.json()
-    print(f"Incoming Payload: {data}")
-
+    
+    # Check if it's an incoming message (ignore outgoing)
     if data.get("typeWebhook") == "incomingMessageReceived":
         msg_data = data.get("messageData", {})
         sender_data = data.get("senderData", {})
@@ -150,17 +156,24 @@ async def webhook(request: Request):
         phone = sender_data.get("chatId", "").split("@")[0]
         sender_name = sender_data.get("senderName", "Customer")
         
-        # Extract text correctly
-        text = msg_data.get("textMessageData", {}).get("textMessage") or \
-               msg_data.get("extendedTextMessageData", {}).get("text", "")
+        # Get text from different possible message formats
+        text = ""
+        if "textMessageData" in msg_data:
+            text = msg_data["textMessageData"].get("textMessage", "")
+        elif "extendedTextMessageData" in msg_data:
+            text = msg_data["extendedTextMessageData"].get("text", "")
         
-        # CALLING WITH ALL 4 ARGUMENTS TO FIX THE TYPEERROR
+        # If no text (like an image), handle_message will check the payload for the fileURL
+        from app_logic import handle_message # Or wherever your logic lives
         handle_message(phone, text, sender_name, data)
 
     return {"status": "ok"}
 
 @app.on_event("startup")
 def startup():
+    # RUN THIS ONCE TO ADD THE MISSING COLUMNS
+    db_manager.init_db() 
+    print("🚀 Database has been reset with new columns.")
     # Only run this once to setup; usually you'd keep your data
     # db_manager.init_db() 
     pass
