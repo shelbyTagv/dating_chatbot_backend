@@ -1,6 +1,6 @@
 import os, re, requests, db_manager
 from fastapi import FastAPI, Request
-from openai import OpenAI  # <--- Updated Import
+from openai import OpenAI
 from dotenv import load_dotenv
 
 load_dotenv()
@@ -15,19 +15,18 @@ BASE_URL = f"https://api.greenapi.com/waInstance{ID_INSTANCE}"
 def send_text(phone, text):
     url = f"{BASE_URL}/sendMessage/{API_TOKEN}"
     payload = {"chatId": f"{phone}@c.us", "message": text}
-    requests.post(url, json=payload)
-
-
+    try:
+        requests.post(url, json=payload)
+    except Exception as e:
+        print(f"Error sending WhatsApp: {e}")
 
 def get_ai_faq(query):
     try:
-        # Context-aware system prompt
         system_msg = (
             "You are the Microhub Finance Assistant. Answer questions ONLY about "
             "Loans, Mukando, Solar Systems, and Funeral Plans. If the user asks "
-            "something unrelated, say you can only help with Microhub finance."
+            "something unrelated, say you can only help with Microhub finance context."
         )
-        # Updated for OpenAI v1.0.0+
         response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
@@ -40,13 +39,9 @@ def get_ai_faq(query):
         print(f"OpenAI Error: {e}")
         return "Our AI is currently offline. Please type '4' to speak with an agent."
 
-
 # --- CHATBOT LOGIC ---
 
 def handle_message(phone, msg, sender_name, payload):
-    """
-    REQUIRED: phone, msg, sender_name, payload (the full webhook JSON)
-    """
     user = db_manager.get_user(phone)
     if not user: 
         user = db_manager.create_user(phone)
@@ -54,12 +49,12 @@ def handle_message(phone, msg, sender_name, payload):
     uid = user['id']
     state = user['chat_state']
 
-    # GLOBAL RESET/EXIT
+    # --- GLOBAL RESET/EXIT ---
     if msg.lower() in ["exit", "restart", "00", "reset"]:
         db_manager.update_user(uid, "chat_state", "START")
         return send_text(phone, "🔄 Session reset. Type 'Hi' to start again.")
 
-    # 1. WELCOME BRANCH
+    # --- 1. WELCOME BRANCH ---
     if state == "START" or msg.lower() in ["hi", "hello", "menu"]:
         db_manager.update_user(uid, "chat_state", "MAIN_MENU")
         menu = (f"Welcome to *MicroHub*, {sender_name}!\n\n"
@@ -67,7 +62,7 @@ def handle_message(phone, msg, sender_name, payload):
                 "_(Type 'Exit' at any time to restart)_")
         return send_text(phone, menu)
 
-    # 2. MAIN MENU SELECTION
+    # --- 2. MAIN MENU SELECTION ---
     elif state == "MAIN_MENU":
         if msg == "1":
             db_manager.update_user(uid, "chat_state", "CATALOGUE")
@@ -80,19 +75,30 @@ def handle_message(phone, msg, sender_name, payload):
         elif msg == "4":
             return send_text(phone, "👨‍💼 Please wait while we connect you to a live agent...")
 
-    # 3. AI FAQ HANDLER
+    # --- 3. AI FAQ HANDLER ---
     elif state == "AI_FAQ":
         answer = get_ai_faq(msg)
         return send_text(phone, f"{answer}\n\n_(Type 'Exit' to return to menu)_")
 
-    # 4. CATALOGUE BRANCHES
+    # --- 4. CATALOGUE BRANCHES ---
     elif state == "CATALOGUE":
         if msg == "1":
             db_manager.update_user(uid, "chat_state", "LOAN_TYPES")
             return send_text(phone, "💰 *Loans*\n1️⃣ Business Loan\n2️⃣ Pension Loan\n3️⃣ Housing Loan\n0️⃣ Back")
-        # Add logic for Mukando/Solar/Funeral here similarly...
+        elif msg == "2":
+            db_manager.update_user(uid, "chat_state", "MUKANDO_TYPES")
+            return send_text(phone, "🤝 *Mukando Types*\n1️⃣ Internal Mukando\n2️⃣ Group Mukando\n0️⃣ Back")
+        elif msg == "3":
+            db_manager.update_user(uid, "chat_state", "SOLAR_TYPES")
+            return send_text(phone, "☀️ *Solar Systems*\n1️⃣ Home Kit 5kVA\n2️⃣ Solar Pump System\n0️⃣ Back")
+        elif msg == "4":
+            db_manager.update_user(uid, "chat_state", "FUNERAL_TYPES")
+            return send_text(phone, "⚰️ *Funeral Plans*\n1️⃣ Silver Plan\n2️⃣ Gold Individual\n3️⃣ Family Plus\n0️⃣ Back")
+        elif msg == "0":
+            db_manager.update_user(uid, "chat_state", "START")
+            return handle_message(phone, "menu", sender_name, payload)
 
-    # 5. LOAN APPLICATION FLOW
+    # --- 5. APPLICATION FLOW (LOANS) ---
     elif state == "LOAN_TYPES":
         loan_map = {"1": "Business Loan", "2": "Pension Loan", "3": "Housing Loan"}
         if msg in loan_map:
@@ -112,7 +118,6 @@ def handle_message(phone, msg, sender_name, payload):
         return send_text(phone, "📸 Please upload a Selfie (Photo):")
 
     elif state == "GET_PHOTO":
-        # Extract image URL from the payload
         file_url = payload.get("messageData", {}).get("fileMessageData", {}).get("downloadUrl")
         if not file_url:
             return send_text(phone, "⚠️ Please upload a photo to proceed.")
@@ -130,7 +135,7 @@ def handle_message(phone, msg, sender_name, payload):
         db_manager.update_user(uid, "chat_state", "FINAL_CONFIRM")
         summary = (f"📑 *Verify Your Details*\n\n"
                    f"ID: {user['name']}\n"
-                   f"Loan: {user['selected_product']}\n"
+                   f"Product: {user['selected_product']}\n"
                    f"Amount: {user['amount']}\n"
                    f"Desc: {msg}\n\n"
                    f"Reply *YES* to submit or *EXIT* to cancel.")
@@ -139,16 +144,13 @@ def handle_message(phone, msg, sender_name, payload):
     elif state == "FINAL_CONFIRM" and msg.lower() == "yes":
         db_manager.save_final_application(uid)
         db_manager.update_user(uid, "chat_state", "START")
-        return send_text(phone, "✅ Application submitted! We will contact you shortly.")
-
-# --- WEBHOOK ENDPOINT (THE FIX IS HERE) ---
+        return send_text(phone, "✅ Application submitted! Our team will contact you shortly.")
 
 # --- WEBHOOK ENDPOINT ---
+
 @app.post("/webhook")
 async def webhook(request: Request):
     data = await request.json()
-    
-    # Check if it's an incoming message (ignore outgoing)
     if data.get("typeWebhook") == "incomingMessageReceived":
         msg_data = data.get("messageData", {})
         sender_data = data.get("senderData", {})
@@ -156,24 +158,18 @@ async def webhook(request: Request):
         phone = sender_data.get("chatId", "").split("@")[0]
         sender_name = sender_data.get("senderName", "Customer")
         
-        # Get text from different possible message formats
         text = ""
         if "textMessageData" in msg_data:
             text = msg_data["textMessageData"].get("textMessage", "")
         elif "extendedTextMessageData" in msg_data:
             text = msg_data["extendedTextMessageData"].get("text", "")
         
-        # If no text (like an image), handle_message will check the payload for the fileURL
-        from app_logic import handle_message # Or wherever your logic lives
+        # Correctly call the function defined in this file
         handle_message(phone, text, sender_name, data)
 
     return {"status": "ok"}
 
 @app.on_event("startup")
 def startup():
-    # RUN THIS ONCE TO ADD THE MISSING COLUMNS
     db_manager.init_db() 
-    print("🚀 Database has been reset with new columns.")
-    # Only run this once to setup; usually you'd keep your data
-    # db_manager.init_db() 
-    pass
+    print("🚀 Database synchronized and server starting...")
