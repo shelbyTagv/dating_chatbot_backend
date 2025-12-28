@@ -31,7 +31,7 @@ def handle_services(phone, text, sender_name, payload, user):
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
 
 
-def show_services(phone, user):
+def show_services(phone, text, sender_name, payload, user):
     """
     Display the list of services to the user.
     """
