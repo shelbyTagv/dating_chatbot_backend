@@ -5,7 +5,6 @@ from datetime import datetime
 _pool = None
 
 def conn():
-    """Returns a connection from the pool."""
     global _pool
     if not _pool:
         _pool = mysql.connector.pooling.MySQLConnectionPool(
@@ -19,12 +18,7 @@ def conn():
         )
     return _pool.get_connection()
 
-
 def reset_db():
-    """
-    Drops all tables and recreates them.
-    This runs automatically on import to ensure schema is always fresh.
-    """
     c = conn()
     cur = c.cursor()
     try:
@@ -40,12 +34,15 @@ def reset_db():
             CREATE TABLE users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 phone VARCHAR(20) UNIQUE,
-                name VARCHAR(100),
+                full_name VARCHAR(100),
+                age INT,
+                gender VARCHAR(20),
                 chat_state VARCHAR(50) DEFAULT 'START',
                 selected_product VARCHAR(100),
                 amount VARCHAR(50),
                 selfie_url TEXT,
                 biz_desc TEXT,
+                national_id VARCHAR(30),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
             )
         """)
@@ -74,14 +71,10 @@ def reset_db():
         cur.close()
         c.close()
 
-
-# Automatically reset the database on import
+# Reset database automatically on import
 reset_db()
 
-
-# --------------------------------------
-# CRUD Functions
-# --------------------------------------
+# CRUD functions
 def get_user(phone):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -121,7 +114,7 @@ def save_final_application(uid):
         """, (
             user['id'],
             user['selected_product'],
-            user['name'],
+            user['national_id'] or user.get('full_name', ''),
             user['selfie_url'],
             user['amount'],
             user['biz_desc']
