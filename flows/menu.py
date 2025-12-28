@@ -19,19 +19,19 @@ def handle_main_menu(phone, text, sender_name, payload, user):
     if text == "1":
         db_manager.update_user(user["id"], "chat_state", "SERVICES")
         # Call the services handler immediately
-        services.show_services(phone, user)
+        services.show_services(phone, text, sender_name, payload, user)
     elif text == "2":
         db_manager.update_user(user["id"], "chat_state", "CONTACT")
         from flows import contact
-        contact.handle_contact_menu(phone)
+        contact.handle_contact_menu(phone, text, sender_name, payload, user)
     elif text == "3":
         db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
         from flows import faqs
-        faqs.handle_faq_menu(phone)
+        faqs.handle_faq_menu(phone, text, sender_name, payload, user)
     elif text == "4":
         db_manager.update_user(user["id"], "chat_state", "AGENT")
         from flows import agent
-        agent.handle_agent(phone)
+        agent.handle_agent(phone, text, sender_name, payload, user)
     elif text == "0":
         handle_start(phone, text, sender_name, payload, user)
     else:
