@@ -37,14 +37,16 @@ def reset_db():
                 full_name VARCHAR(100),
                 age INT,
                 gender VARCHAR(20),
+                address VARCHAR(200),
+                national_id VARCHAR(30),
                 chat_state VARCHAR(50) DEFAULT 'START',
                 selected_product VARCHAR(100),
                 amount VARCHAR(50),
                 selfie_url TEXT,
                 biz_desc TEXT,
-                national_id VARCHAR(30),
                 created_at DATETIME DEFAULT CURRENT_TIMESTAMP
-            )
+            );
+
         """)
 
         # Applications table
