@@ -1,6 +1,7 @@
 from whatsapp import send_text
 from db import db_manager
 from utils.constants import STATE_MAIN_MENU, STATE_START
+from flows import services
 
 def handle_start(phone, text, sender_name, payload, user):
     db_manager.update_user(user["id"], "chat_state", STATE_MAIN_MENU)
@@ -16,17 +17,21 @@ def handle_start(phone, text, sender_name, payload, user):
 
 def handle_main_menu(phone, text, sender_name, payload, user):
     if text == "1":
-        # Set state to SERVICES and let services.py handle the menu
         db_manager.update_user(user["id"], "chat_state", "SERVICES")
+        # Call the services handler immediately
+        services.show_services(phone, user)
     elif text == "2":
-        # Set state to CONTACT and let contact.py handle logic
         db_manager.update_user(user["id"], "chat_state", "CONTACT")
+        from flows import contact
+        contact.show_contact(phone)
     elif text == "3":
-        # Set state to FAQ and let faq.py handle logic
         db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
+        from flows import faq
+        faq.show_faq_menu(phone)
     elif text == "4":
-        # Set state to AGENT and let agent.py handle logic
         db_manager.update_user(user["id"], "chat_state", "AGENT")
+        from flows import agent
+        agent.show_agent_wait(phone)
     elif text == "0":
         handle_start(phone, text, sender_name, payload, user)
     else:
