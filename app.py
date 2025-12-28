@@ -1,26 +1,17 @@
 from fastapi import FastAPI, Request
 from db import db_manager
-
-
-from flows import menu, catalogue, faqs, agent, applications, contact
+from flows import menu, services, faqs, agent, applications, contact
 
 app = FastAPI()
 
 STATE_HANDLERS = {
     "START": menu.handle_start,
     "MAIN_MENU": menu.handle_main_menu,
-
-    "SERVICES": catalogue.handle_services,
-    "LOAN_TYPES": catalogue.handle_loan_types,
-
-    "CONTACT_MENU": contact.handle_contact_menu,
-    "CONTACT_BRANCH": contact.handle_contact_selection,
-
+    "SERVICES": services.handle_services,
+    "LOAN_TYPES": services.handle_loan_types,
     "FAQ_MENU": faqs.handle_faq_menu,
     "AI_FAQ": faqs.handle_ai_faq,
-
     "AGENT": agent.handle_agent,
-
     "CONFIRM_APPLY": applications.handle_confirm_apply,
     "GET_NAME": applications.handle_get_name,
     "GET_AGE": applications.handle_get_age,
@@ -30,6 +21,7 @@ STATE_HANDLERS = {
     "GET_AMOUNT": applications.handle_get_amount,
     "FINAL_CONFIRM": applications.handle_final_confirm,
 }
+
 
 
 @app.post("/webhook")

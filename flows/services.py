@@ -1,3 +1,4 @@
+
 from whatsapp import send_text
 from db import db_manager
 
@@ -9,21 +10,19 @@ LOAN_MAP = {
     "5": "Asset Finance Loan",
 }
 
-SERVICES_LIST = [
-    "💼 Hassle Free Loans",
-    "🤝 Customer Centric Staff",
-    "📊 Regular updates on status of Loans",
-    "⚙️ Technologically driven products",
-    "🎓 Training and Advisory"
+SERVICE_LIST = [
+    "Hassle Free Loans",
+    "Customer Centric Staff",
+    "Regular updates on status of Loans",
+    "Technologically driven products",
+    "Training and Advisory"
 ]
 
 def handle_services(phone, text, sender_name, payload, user):
     """
-    Handles the services menu. Shows loans if '1' is selected,
-    otherwise lists all other services.
+    Main services menu.
     """
     if text == "1":
-        # User wants loans
         db_manager.update_user(user["id"], "chat_state", "LOAN_TYPES")
         send_text(
             phone,
@@ -35,20 +34,20 @@ def handle_services(phone, text, sender_name, payload, user):
             "5️⃣ Asset Finance Loans\n"
             "0️⃣ Back"
         )
-    elif text in ["2", "3", "4", "5"]:
-        # List all other services offered
-        msg = "📋 *Our Services Offered:*\n\n"
-        for i, service in enumerate(SERVICES_LIST, start=1):
-            msg += f"{i}. {service}\n"
-        msg += "\nType 0 to return."
+    elif text == "2":
+        # Show hardcoded services
+        msg = "🌟 *Our Key Services:*\n"
+        for idx, s in enumerate(SERVICE_LIST, start=1):
+            msg += f"{idx}. {s}\n"
+        msg += "\nType 0 to return to main menu."
         send_text(phone, msg)
     elif text == "0":
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
-
+        send_text(phone, "Returning to main menu...")
 
 def handle_loan_types(phone, text, sender_name, payload, user):
     """
-    Handles loan type selection from the services menu.
+    Handles loan selection from the user.
     """
     if text in LOAN_MAP:
         db_manager.update_user(user["id"], "selected_product", LOAN_MAP[text])
@@ -61,3 +60,4 @@ def handle_loan_types(phone, text, sender_name, payload, user):
         )
     elif text == "0":
         db_manager.update_user(user["id"], "chat_state", "SERVICES")
+        send_text(phone, "Returning to services menu...")
