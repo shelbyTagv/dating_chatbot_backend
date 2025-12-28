@@ -2,48 +2,34 @@
 from whatsapp import send_text
 from db import db_manager
 
+SERVICES_LIST = [
+    "💼 Hassle-Free Loans",
+    "🤝 Customer Centric Staff",
+    "📈 Regular updates on status of Loans",
+    "🖥 Technologically driven products",
+    "🎓 Training and Advisory"
+]
+
 LOAN_MAP = {
     "1": "Micro Business Loan",
     "2": "SME Loan",
     "3": "Personal Loan",
     "4": "SSB Loan",
-    "5": "Asset Finance Loan",
+    "5": "Asset Finance Loan"
 }
 
-SERVICE_LIST = [
-    "Hassle Free Loans",
-    "Customer Centric Staff",
-    "Regular updates on status of Loans",
-    "Technologically driven products",
-    "Training and Advisory"
-]
-
 def handle_services(phone, text, sender_name, payload, user):
-    """
-    Main services menu.
-    """
     if text == "1":
         db_manager.update_user(user["id"], "chat_state", "LOAN_TYPES")
-        send_text(
-            phone,
-            "💼 *Hassle-Free Loans*\n\n"
-            "1️⃣ Micro Business Loans\n"
-            "2️⃣ SME Loans\n"
-            "3️⃣ Personal Loans\n"
-            "4️⃣ SSB Loans\n"
-            "5️⃣ Asset Finance Loans\n"
-            "0️⃣ Back"
-        )
-    elif text == "2":
-        # Show hardcoded services
-        msg = "🌟 *Our Key Services:*\n"
-        for idx, s in enumerate(SERVICE_LIST, start=1):
-            msg += f"{idx}. {s}\n"
-        msg += "\nType 0 to return to main menu."
-        send_text(phone, msg)
+        loans_text = "\n".join([f"{i}️⃣ {loan}" for i, loan in LOAN_MAP.items()])
+        send_text(phone, f"💼 *Hassle-Free Loans*\n\n{loans_text}\n0️⃣ Back")
+
+    elif text in ["2", "3", "4", "5"]:
+        services_text = "\n".join(SERVICES_LIST)
+        send_text(phone, f"ℹ️ Our Services:\n{services_text}\n\nType 0 to return.")
+
     elif text == "0":
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
-        send_text(phone, "Returning to main menu...")
 
 def handle_loan_types(phone, text, sender_name, payload, user):
     """
