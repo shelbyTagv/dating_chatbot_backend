@@ -1,6 +1,7 @@
 from db import db_manager
 from whatsapp import send_text
 from ai import ask_microhub_ai
+from db import db_manager
 
 # ---------------------------
 # HARD-CODED FAQ CONTENT
@@ -43,6 +44,13 @@ FAQS = {
 # ---------------------------
 
 def handle_faq_menu(phone, text, sender_name, payload, user):
+
+
+    if text == "3":
+        db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
+        handle_faq_menu(phone, "", sender_name, payload, user)  # empty text triggers menu display
+        return
+
     # Always show menu first if user just entered FAQ_MENU
     if user["chat_state"] != "AI_FAQ" and text in FAQS:
         send_text(
