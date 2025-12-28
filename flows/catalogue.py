@@ -12,25 +12,6 @@ LOAN_MAP = {
 }
 
 
-def handle_catalogue(phone, text, sender_name, payload, user):
-    if text == "1":
-        db_manager.update_user(user["id"], "chat_state", "LOAN_TYPES")
-        send_text(phone, "💰 Loans\n1️⃣ Business\n2️⃣ Pension\n3️⃣ Housing\n0️⃣ Back")
-
-    elif text == "2":
-        send_text(phone, "🤝 Mukando\nInternal & Group Mukando available")
-
-    elif text == "3":
-        send_text(phone, "☀️ Solar\nHome Kits & Pumps")
-
-    elif text == "4":
-        send_text(phone, "⚰️ Funeral Plans\nSilver, Gold, Family")
-
-    elif text == "0":
-        db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
-        send_text(phone, "Returning to menu...")
-
-
 def handle_services(phone, text, sender_name, payload, user):
 
     if text == "1":

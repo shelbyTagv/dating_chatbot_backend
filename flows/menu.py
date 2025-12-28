@@ -7,10 +7,10 @@ def handle_start(phone, text, sender_name, payload, user):
     db_manager.update_user(user["id"], "chat_state", STATE_MAIN_MENU)
 
     menu = (
-        f"Welcome to *MicroHub*, {sender_name}!\n\n"
+        f"Welcome to *MICROHUB FINANCIAL SERVICES*, {sender_name}!\n\n"
         "1️⃣ Products & Services\n"
         "2️⃣ Contact Us\n"
-        "3️⃣ FAQs\n"
+        "3️⃣ FAQs(frequently Asked Questions)\n"
         "4️⃣ Talk to an Agent\n\n"
         "_Type EXIT to restart_"
     )

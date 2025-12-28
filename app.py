@@ -21,6 +21,7 @@ STATE_HANDLERS = {
     "AI_FAQ": faqs.handle_ai_faq,
 
     "AGENT": agent.handle_agent,
+    "AGENT_WAIT": agent.handle_agent_wait,
 
     "CONFIRM_APPLY": applications.handle_confirm_apply,
     "GET_NAME": applications.handle_get_name,
