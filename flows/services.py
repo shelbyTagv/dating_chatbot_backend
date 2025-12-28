@@ -26,7 +26,7 @@ def show_services(phone, user):
     services_text += "\n\n1️⃣ See Loans\n0️⃣ Back to Main Menu"
     send_text(phone, services_text)
 
-def handle_service_selection(phone, text, user):
+def handle_services(phone, text, user):
     """
     Handles user's selection in the services menu.
     """
