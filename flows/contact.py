@@ -171,7 +171,8 @@ BRANCHES = {
 
 
 def handle_contact_menu(phone, text, sender_name, payload, user):
-    if text == "" or text.lower() == "menu":
+    # If user just entered the contact menu or types "menu"
+    if text == "" or text.lower() == "menu" or user["chat_state"] != "CONTACT_BRANCH":
         db_manager.update_user(user["id"], "chat_state", "CONTACT_BRANCH")
         send_text(
             phone,
@@ -193,6 +194,11 @@ def handle_contact_menu(phone, text, sender_name, payload, user):
             "1️⃣5️⃣ Bulawayo\n\n"
             "0️⃣ Back"
         )
+        return
+
+    # Handle user selecting a branch
+    handle_contact_selection(phone, text, user)
+
 
 def handle_contact_selection(phone, text, user):
     branches = {
@@ -217,5 +223,9 @@ def handle_contact_selection(phone, text, user):
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
         return
 
-    if text in branches:
-        send_text(phone, branches[text])
+    if text in BRANCHES:
+        send_text(phone, BRANCHES[text]["details"])
+
+    else:
+        send_text(phone, "❌ Invalid option. Please choose a branch from the list or 0 to go back.")
+
