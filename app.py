@@ -20,6 +20,8 @@ STATE_HANDLERS = {
     "GET_ID_PHOTO": applications.handle_get_id_photo,
     "GET_AMOUNT": applications.handle_get_amount,
     "FINAL_CONFIRM": applications.handle_final_confirm,
+    "CONTACT": contact.handle_contact_menu,
+    "CONTACT_BRANCH": contact.handle_contact_selection
 }
 
 
