@@ -46,6 +46,23 @@ FAQS = {
 def handle_faq_menu(phone, text, sender_name, payload, user):
     text = text.strip()  # normalize input
 
+    # First, check if user just entered FAQ menu
+    if user["chat_state"] != "FAQ_MENU":
+        # Update state to FAQ_MENU and show menu
+        db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
+        send_text(
+            phone,
+            "❓ *Microhub FAQs*\n\n"
+            "1️⃣ What loans does Microhub offer?\n"
+            "2️⃣ What are the loan requirements?\n"
+            "3️⃣ How long does approval take?\n"
+            "4️⃣ Do you offer SME loans?\n"
+            "5️⃣ Can I apply via WhatsApp?\n"
+            "6️⃣ Ask AI a question\n\n"
+            "0️⃣ Back to Main Menu"
+        )
+        return
+
     # Back to main menu
     if text == "0":
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
@@ -62,9 +79,10 @@ def handle_faq_menu(phone, text, sender_name, payload, user):
         send_text(phone, FAQS[text])
         return
 
-    # If text is empty or invalid, show menu
+    # If text is empty or invalid, show menu again
     send_text(
         phone,
+        "❌ Invalid option. Please choose from the menu.\n\n"
         "❓ *Microhub FAQs*\n\n"
         "1️⃣ What loans does Microhub offer?\n"
         "2️⃣ What are the loan requirements?\n"
@@ -74,6 +92,7 @@ def handle_faq_menu(phone, text, sender_name, payload, user):
         "6️⃣ Ask AI a question\n\n"
         "0️⃣ Back to Main Menu"
     )
+
 
 
 # ---------------------------
