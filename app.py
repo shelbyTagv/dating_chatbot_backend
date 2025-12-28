@@ -59,5 +59,4 @@ async def webhook(request: Request):
 
 @app.on_event("startup")
 def startup():
-    db_manager.init_db()
     print("Server ready")

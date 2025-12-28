@@ -5,9 +5,9 @@ from datetime import datetime
 _pool = None
 
 def conn():
+    """Returns a connection from the pool."""
     global _pool
     if not _pool:
-        # Railway environment variables
         _pool = mysql.connector.pooling.MySQLConnectionPool(
             pool_name="microhub_pool",
             pool_size=10,
@@ -19,27 +19,28 @@ def conn():
         )
     return _pool.get_connection()
 
-def init_db():
+
+def reset_db():
     """
-    Drops existing tables and recreates them to ensure 
-    the schema is perfectly aligned with the chatbot logic.
+    Drops all tables and recreates them.
+    This runs automatically on import to ensure schema is always fresh.
     """
     c = conn()
     cur = c.cursor()
     try:
-        print("🛠 Resetting Database...")
-        # Disable foreign key checks to drop tables safely
+        print("🛠 Dropping and recreating tables...")
+
         cur.execute("SET FOREIGN_KEY_CHECKS = 0")
         cur.execute("DROP TABLE IF EXISTS applications")
         cur.execute("DROP TABLE IF EXISTS users")
         cur.execute("SET FOREIGN_KEY_CHECKS = 1")
 
-        # Table 1: Users (Tracks state and temporary application data)
+        # Users table
         cur.execute("""
             CREATE TABLE users (
                 id INT AUTO_INCREMENT PRIMARY KEY,
                 phone VARCHAR(20) UNIQUE,
-                name VARCHAR(100), -- Used to store ID Number temporarily
+                name VARCHAR(100),
                 chat_state VARCHAR(50) DEFAULT 'START',
                 selected_product VARCHAR(100),
                 amount VARCHAR(50),
@@ -49,7 +50,7 @@ def init_db():
             )
         """)
 
-        # Table 2: Applications (Final stored loan records)
+        # Applications table
         cur.execute("""
             CREATE TABLE applications (
                 id INT AUTO_INCREMENT PRIMARY KEY,
@@ -64,15 +65,23 @@ def init_db():
                 FOREIGN KEY (user_id) REFERENCES users(id) ON DELETE CASCADE
             )
         """)
-        
+
         c.commit()
-        print("✅ Database Initialized with all required columns.")
+        print("✅ Database reset complete.")
     except Exception as e:
-        print(f"❌ Error during DB init: {e}")
+        print(f"❌ Error resetting DB: {e}")
     finally:
         cur.close()
         c.close()
 
+
+# Automatically reset the database on import
+reset_db()
+
+
+# --------------------------------------
+# CRUD Functions
+# --------------------------------------
 def get_user(phone):
     c = conn()
     cur = c.cursor(dictionary=True)
@@ -92,12 +101,8 @@ def create_user(phone):
     return get_user(phone)
 
 def update_user(uid, field, value):
-    """
-    Updates specific user fields (chat_state, name, amount, etc.)
-    """
     c = conn()
     cur = c.cursor()
-    # Parameterized query to prevent SQL Injection
     query = f"UPDATE users SET {field}=%s WHERE id=%s"
     cur.execute(query, (value, uid))
     c.commit()
@@ -105,31 +110,22 @@ def update_user(uid, field, value):
     c.close()
 
 def save_final_application(uid):
-    """
-    Moves data from the 'users' temporary fields into the 'applications' table
-    once the user confirms with 'YES'.
-    """
-    user = None
     c = conn()
     cur = c.cursor(dictionary=True)
-    
-    # Get the latest data from the user session
     cur.execute("SELECT * FROM users WHERE id=%s", (uid,))
     user = cur.fetchone()
-    
     if user:
         cur.execute("""
             INSERT INTO applications (user_id, product_type, national_id, selfie_url, amount_requested, business_desc)
             VALUES (%s, %s, %s, %s, %s, %s)
         """, (
-            user['id'], 
-            user['selected_product'], 
-            user['name'], # We used the 'name' column for National ID
-            user['selfie_url'], 
-            user['amount'], 
+            user['id'],
+            user['selected_product'],
+            user['name'],
+            user['selfie_url'],
+            user['amount'],
             user['biz_desc']
         ))
         c.commit()
-        
     cur.close()
     c.close()
