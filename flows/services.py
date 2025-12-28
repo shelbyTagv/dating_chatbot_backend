@@ -40,10 +40,7 @@ def show_services(phone, user):
     services_text += "\n\n1️⃣ See Loans\n0️⃣ Back to Main Menu"
     send_text(phone, services_text)
 
-def handle_loan_types(phone, text, user):
-    """
-    Handles loan selection from the user.
-    """
+def handle_loan_types(phone, text, sender_name, payload, user):
     if text in LOAN_MAP:
         db_manager.update_user(user["id"], "selected_product", LOAN_MAP[text])
         db_manager.update_user(user["id"], "chat_state", "CONFIRM_APPLY")
@@ -54,6 +51,5 @@ def handle_loan_types(phone, text, user):
             "or *0* to go back"
         )
     elif text == "0":
-        show_services(phone, user)
-    else:
-        send_text(phone, "❌ Invalid selection. Choose a loan number or 0 to go back.")
+        db_manager.update_user(user["id"], "chat_state", "SERVICES")
+        send_text(phone, "Returning to services menu...")
