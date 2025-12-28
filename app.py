@@ -10,7 +10,6 @@ STATE_HANDLERS = {
     "START": menu.handle_start,
     "MAIN_MENU": menu.handle_main_menu,
 
-    "CATALOGUE": catalogue.handle_catalogue,
     "SERVICES": catalogue.handle_services,
     "LOAN_TYPES": catalogue.handle_loan_types,
 
