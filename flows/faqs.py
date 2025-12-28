@@ -43,8 +43,8 @@ FAQS = {
 # ---------------------------
 
 def handle_faq_menu(phone, text, sender_name, payload, user):
-
-    if text == "" or text.lower() == "menu":
+    # Always show menu first if user just entered FAQ_MENU
+    if user["chat_state"] != "AI_FAQ" and text in FAQS:
         send_text(
             phone,
             "❓ *Microhub FAQs*\n\n"
@@ -57,6 +57,7 @@ def handle_faq_menu(phone, text, sender_name, payload, user):
             "0️⃣ Back to Main Menu"
         )
         return
+
 
     if text in FAQS:
         send_text(phone, FAQS[text])
