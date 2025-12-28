@@ -1,4 +1,3 @@
-
 from whatsapp import send_text
 from db import db_manager
 
@@ -18,20 +17,31 @@ LOAN_MAP = {
     "5": "Asset Finance Loan"
 }
 
-def handle_services(phone, text, sender_name, payload, user):
-    if text == "1":
+def show_services(phone, user):
+    """
+    Display the list of services to the user.
+    """
+    db_manager.update_user(user["id"], "chat_state", "SERVICES")
+    services_text = "📋 *Our Services*\n\n" + "\n".join([f"{i+1}. {s}" for i, s in enumerate(SERVICES_LIST)])
+    services_text += "\n\n1️⃣ See Loans\n0️⃣ Back to Main Menu"
+    send_text(phone, services_text)
+
+def handle_service_selection(phone, text, user):
+    """
+    Handles user's selection in the services menu.
+    """
+    if text == "1":  # Show loans
         db_manager.update_user(user["id"], "chat_state", "LOAN_TYPES")
         loans_text = "\n".join([f"{i}️⃣ {loan}" for i, loan in LOAN_MAP.items()])
         send_text(phone, f"💼 *Hassle-Free Loans*\n\n{loans_text}\n0️⃣ Back")
-
-    elif text in ["2", "3", "4", "5"]:
-        services_text = "\n".join(SERVICES_LIST)
-        send_text(phone, f"ℹ️ Our Services:\n{services_text}\n\nType 0 to return.")
-
-    elif text == "0":
+    elif text == "0":  # Back to main menu
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
+        from flows.menu import handle_main_menu  # Avoid circular import
+        handle_main_menu(phone, "0", user.get("name", ""), None, user)
+    else:
+        send_text(phone, "❌ Invalid option. Please choose 1 for Loans or 0 to go back.")
 
-def handle_loan_types(phone, text, sender_name, payload, user):
+def handle_loan_types(phone, text, user):
     """
     Handles loan selection from the user.
     """
@@ -45,5 +55,6 @@ def handle_loan_types(phone, text, sender_name, payload, user):
             "or *0* to go back"
         )
     elif text == "0":
-        db_manager.update_user(user["id"], "chat_state", "SERVICES")
-        send_text(phone, "Returning to services menu...")
+        show_services(phone, user)
+    else:
+        send_text(phone, "❌ Invalid selection. Choose a loan number or 0 to go back.")
