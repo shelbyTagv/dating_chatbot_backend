@@ -44,43 +44,37 @@ FAQS = {
 # ---------------------------
 
 def handle_faq_menu(phone, text, sender_name, payload, user):
+    text = text.strip()  # normalize input
 
-
-    if text == "3":
-        db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
-        handle_faq_menu(phone, "", sender_name, payload, user)  # empty text triggers menu display
+    # Back to main menu
+    if text == "0":
+        db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
         return
 
-    # Always show menu first if user just entered FAQ_MENU
-    if user["chat_state"] != "AI_FAQ" and text in FAQS:
-        send_text(
-            phone,
-            "❓ *Microhub FAQs*\n\n"
-            "1️⃣ What loans does Microhub offer?\n"
-            "2️⃣ What are the loan requirements?\n"
-            "3️⃣ How long does approval take?\n"
-            "4️⃣ Do you offer SME loans?\n"
-            "5️⃣ Can I apply via WhatsApp?\n"
-            "6️⃣ Ask AI a question\n\n"
-            "0️⃣ Back to Main Menu"
-        )
-        return
-
-
-    if text in FAQS:
-        send_text(phone, FAQS[text])
-        return
-
+    # AI FAQ
     if text == "6":
         db_manager.update_user(user["id"], "chat_state", "AI_FAQ")
         send_text(phone, "🤖 Ask me any question about Microhub services.\n\nType '0' to go back.")
         return
 
-    if text == "0":
-        db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
+    # Show FAQ answer if valid choice
+    if text in FAQS:
+        send_text(phone, FAQS[text])
         return
 
-    send_text(phone, "❌ Invalid option. Please choose from the menu.")
+    # If text is empty or invalid, show menu
+    send_text(
+        phone,
+        "❓ *Microhub FAQs*\n\n"
+        "1️⃣ What loans does Microhub offer?\n"
+        "2️⃣ What are the loan requirements?\n"
+        "3️⃣ How long does approval take?\n"
+        "4️⃣ Do you offer SME loans?\n"
+        "5️⃣ Can I apply via WhatsApp?\n"
+        "6️⃣ Ask AI a question\n\n"
+        "0️⃣ Back to Main Menu"
+    )
+
 
 # ---------------------------
 # AI FAQ HANDLER
