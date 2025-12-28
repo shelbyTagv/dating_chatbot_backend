@@ -1,28 +1,87 @@
-from whatsapp import send_text
-from ai.faq_ai import ask_ai
 from db import db_manager
+from whatsapp import send_text
+from ai import ask_microhub_ai
 
+# ---------------------------
+# HARD-CODED FAQ CONTENT
+# ---------------------------
 
 FAQS = {
-    "1": "We offer Business, Pension, and Housing loans.",
-    "2": "Mukando is a rotating savings scheme.",
+    "1": (
+        "💼 *Loans Offered*\n\n"
+        "• Micro Business Loans\n"
+        "• SME Loans\n"
+        "• Personal Salary-Based Loans\n"
+        "• SSB Loans\n"
+        "• Asset Finance Loans"
+    ),
+    "2": (
+        "📄 *Loan Requirements*\n\n"
+        "• Valid National ID\n"
+        "• Proof of income or business\n"
+        "• Recent bank statements\n"
+        "• Completed application form"
+    ),
+    "3": (
+        "⏱ *Approval Time*\n\n"
+        "Loan approval typically takes 24–72 hours "
+        "after all required documents are submitted."
+    ),
+    "4": (
+        "🏢 *SME Loans*\n\n"
+        "Yes. We offer flexible financing solutions "
+        "for Small and Medium Enterprises."
+    ),
+    "5": (
+        "📲 *WhatsApp Applications*\n\n"
+        "Yes. You can apply for a loan directly through this WhatsApp chatbot."
+    )
 }
 
+# ---------------------------
+# FAQ MENU HANDLER
+# ---------------------------
+
 def handle_faq_menu(phone, text, sender_name, payload, user):
-    if text == "1":
-        msg = "📘 FAQs\n"
-        for k, v in FAQS.items():
-            msg += f"{k}. {v}\n"
-        send_text(phone, msg)
 
-    elif text == "2":
+    if text == "" or text.lower() == "menu":
+        send_text(
+            phone,
+            "❓ *Microhub FAQs*\n\n"
+            "1️⃣ What loans does Microhub offer?\n"
+            "2️⃣ What are the loan requirements?\n"
+            "3️⃣ How long does approval take?\n"
+            "4️⃣ Do you offer SME loans?\n"
+            "5️⃣ Can I apply via WhatsApp?\n"
+            "6️⃣ Ask AI a question\n\n"
+            "0️⃣ Back to Main Menu"
+        )
+        return
+
+    if text in FAQS:
+        send_text(phone, FAQS[text])
+        return
+
+    if text == "6":
         db_manager.update_user(user["id"], "chat_state", "AI_FAQ")
-        send_text(phone, "🤖 Ask your question:")
+        send_text(phone, "🤖 Ask me any question about Microhub services.\n\nType '0' to go back.")
+        return
 
-    elif text == "0":
+    if text == "0":
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
-        send_text(phone, "Back to menu")
+        return
+
+    send_text(phone, "❌ Invalid option. Please choose from the menu.")
+
+# ---------------------------
+# AI FAQ HANDLER
+# ---------------------------
 
 def handle_ai_faq(phone, text, sender_name, payload, user):
-    answer = ask_ai(text)
+
+    if text == "0":
+        db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
+        return
+
+    answer = ask_microhub_ai(text)
     send_text(phone, answer)

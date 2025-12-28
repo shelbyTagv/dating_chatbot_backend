@@ -40,3 +40,5 @@ def handle_main_menu(phone, text, sender_name, payload, user):
 
     elif text == "0":
         handle_start(phone, text, sender_name, payload, user)
+
+    send_text(phone, "❌ Invalid option. Please choose 1–4.")

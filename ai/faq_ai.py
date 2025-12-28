@@ -1,24 +1,27 @@
 from openai import OpenAI
-from config import OPENAI_API_KEY
+import os
 
-client = OpenAI(api_key=OPENAI_API_KEY)
+client = OpenAI(api_key=os.getenv("OPENAI_API_KEY"))
 
-SYSTEM_PROMPT = (
-    "You are the Microhub Finance Assistant. "
-    "Answer ONLY about Loans, Mukando, Solar Systems, and Funeral Plans. "
-    "If unrelated, politely decline."
-)
+def ask_microhub_ai(question):
 
-def ask_ai(question: str) -> str:
+    system_prompt = (
+        "You are a Microhub Financial Services assistant. "
+        "You may ONLY answer questions related to Microhub loans, "
+        "financial products, branches, or application processes. "
+        "If a question is unrelated, politely say you can only help "
+        "with Microhub services."
+    )
+
     try:
-        res = client.chat.completions.create(
+        response = client.chat.completions.create(
             model="gpt-3.5-turbo",
             messages=[
-                {"role": "system", "content": SYSTEM_PROMPT},
+                {"role": "system", "content": system_prompt},
                 {"role": "user", "content": question}
             ]
         )
-        return res.choices[0].message.content
-    except Exception as e:
-        print(f"OpenAI error: {e}")
-        return "AI is currently unavailable. Please try again later."
+        return response.choices[0].message.content
+
+    except Exception:
+        return "⚠️ Our AI service is currently unavailable. Please try again later."
