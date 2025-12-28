@@ -23,15 +23,15 @@ def handle_main_menu(phone, text, sender_name, payload, user):
     elif text == "2":
         db_manager.update_user(user["id"], "chat_state", "CONTACT")
         from flows import contact
-        contact.show_contact(phone)
+        contact.handle_contact_menu(phone)
     elif text == "3":
         db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
-        from flows import faq
-        faq.show_faq_menu(phone)
+        from flows import faqs
+        faqs.handle_faq_menu(phone)
     elif text == "4":
         db_manager.update_user(user["id"], "chat_state", "AGENT")
         from flows import agent
-        agent.show_agent_wait(phone)
+        agent.handle_agent(phone)
     elif text == "0":
         handle_start(phone, text, sender_name, payload, user)
     else:
