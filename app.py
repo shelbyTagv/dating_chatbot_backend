@@ -41,23 +41,33 @@ async def webhook(request: Request):
 
     text = ""
     if "textMessageData" in msg_data:
-        text = msg_data["textMessageData"].get("textMessage", "")
+        text = msg_data["textMessageData"].get("textMessage", "").strip()
     elif "extendedTextMessageData" in msg_data:
-        text = msg_data["extendedTextMessageData"].get("text", "")
+        text = msg_data["extendedTextMessageData"].get("text", "").strip()
 
     user = db_manager.get_user(phone)
     if not user:
         user = db_manager.create_user(phone)
 
-    if text.lower() in ["exit", "reset", "restart"]:
-        db_manager.update_user(user["id"], "chat_state", "START")
+    # -------------------------------------------------
+    # GLOBAL EXIT HANDLER (🔥 THIS IS THE KEY)
+    # -------------------------------------------------
+    if text.lower() in {"exit", "menu", "home"}:
+        db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
 
+        # force main menu render
+        menu.handle_main_menu(phone, "", sender_name, data, user)
+        return {"status": "ok"}
+
+    # -------------------------------------------------
+    # NORMAL STATE ROUTING
+    # -------------------------------------------------
     state = user["chat_state"]
     handler = STATE_HANDLERS.get(state, menu.handle_start)
-
     handler(phone, text, sender_name, data, user)
 
     return {"status": "ok"}
+
 
 @app.on_event("startup")
 def startup():
