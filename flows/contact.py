@@ -171,61 +171,39 @@ BRANCHES = {
 
 
 def handle_contact_menu(phone, text, sender_name, payload, user):
-    # If user just entered the contact menu or types "menu"
-    if text == "" or text.lower() == "menu" or user["chat_state"] != "CONTACT_BRANCH":
-        db_manager.update_user(user["id"], "chat_state", "CONTACT_BRANCH")
-        send_text(
-            phone,
-            "📍 *Microhub Branches*\n\n"
-            "1️⃣ Head Office\n"
-            "2️⃣ Main Branch (Kaguvi)\n"
-            "3️⃣ Chitungwiza\n"
-            "4️⃣ Karoi\n"
-            "5️⃣ Chegutu\n"
-            "6️⃣ Bindura\n"
-            "7️⃣ Kadoma\n"
-            "8️⃣ Marondera\n"
-            "9️⃣ Chinhoyi\n"
-            "🔟 Murehwa\n"
-            "1️⃣1️⃣ Chivhu\n"
-            "1️⃣2️⃣ Mutare\n"
-            "1️⃣3️⃣ Masvingo\n"
-            "1️⃣4️⃣ Gweru\n"
-            "1️⃣5️⃣ Bulawayo\n\n"
-            "0️⃣ Back"
-        )
-        return
+    db_manager.update_user(user["id"], "chat_state", "CONTACT_BRANCH")
 
-    # Handle user selecting a branch
-    handle_contact_selection(phone, text, user)
+    send_text(
+        phone,
+        "📍 *Microhub Branches*\n\n"
+        "1️⃣ Head Office\n"
+        "2️⃣ Main Branch (Kaguvi)\n"
+        "3️⃣ Chitungwiza\n"
+        "4️⃣ Karoi\n"
+        "5️⃣ Chegutu\n"
+        "6️⃣ Bindura\n"
+        "7️⃣ Kadoma\n"
+        "8️⃣ Marondera\n"
+        "9️⃣ Chinhoyi\n"
+        "🔟 Murehwa\n"
+        "1️⃣1️⃣ Chivhu\n"
+        "1️⃣2️⃣ Mutare\n"
+        "1️⃣3️⃣ Masvingo\n"
+        "1️⃣4️⃣ Gweru\n"
+        "1️⃣5️⃣ Bulawayo\n\n"
+        "0️⃣ Back"
+    )
 
-
-def handle_contact_selection(phone, text, user):
-    branches = {
-        "1": (
-            "*Head Office*\n"
-            "19 Dan Judson Rd, Milton Park, Harare\n"
-            "+263 242-750-377/9\n"
-            "+263 788 369 595\n"
-            "hello@microhub.co.zw"
-        ),
-        "2": (
-            "*Main Branch – Kaguvi*\n"
-            "61 Kaguvi Street, Harare\n"
-            "+263 242-750-377/9\n"
-            "+263 788 369 595\n"
-            "hellokaguvi@microhub.co.zw"
-        ),
-        # continue mapping...
-    }
-
+def handle_contact_selection(phone, text, sender_name, payload, user):
     if text == "0":
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
         return
 
     if text in BRANCHES:
+        # IMPORTANT: keep user in CONTACT_BRANCH
+        db_manager.update_user(user["id"], "chat_state", "CONTACT_BRANCH")
         send_text(phone, BRANCHES[text]["details"])
+        return
 
-    else:
-        send_text(phone, "❌ Invalid option. Please choose a branch from the list or 0 to go back.")
+    send_text(phone, "❌ Invalid option. Please choose a branch or 0 to go back.")
 
