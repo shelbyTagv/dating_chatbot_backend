@@ -190,20 +190,15 @@ def handle_contact_menu(phone, text, sender_name, payload, user):
         "1️⃣2️⃣ Mutare\n"
         "1️⃣3️⃣ Masvingo\n"
         "1️⃣4️⃣ Gweru\n"
-        "1️⃣5️⃣ Bulawayo\n\n"
-        "0️⃣ Back"
+        "1️⃣5️⃣ Bulawayo"
     )
 
-def handle_contact_selection(phone, text, sender_name, payload, user):
-    if text == "0":
-        db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
-        return
 
+def handle_contact_selection(phone, text, sender_name, payload, user):
     if text in BRANCHES:
-        # IMPORTANT: keep user in CONTACT_BRANCH
-        db_manager.update_user(user["id"], "chat_state", "CONTACT_BRANCH")
         send_text(phone, BRANCHES[text]["details"])
         return
 
-    send_text(phone, "❌ Invalid option. Please choose a branch or 0 to go back.")
+    send_text(phone, "❌ Invalid branch. Please choose a number from the list.")
+
 

@@ -58,20 +58,16 @@ def handle_faq_menu(phone, text, sender_name, payload, user):
             "3️⃣ How long does approval take?\n"
             "4️⃣ Do you offer SME loans?\n"
             "5️⃣ Can I apply via WhatsApp?\n"
-            "6️⃣ Ask AI a question\n\n"
-            "0️⃣ Back to Main Menu"
+            "6️⃣ Ask me any question\n\n"
+            
         )
         return
 
-    # Back to main menu
-    if text == "0":
-        db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
-        return
 
     # AI FAQ
     if text == "6":
         db_manager.update_user(user["id"], "chat_state", "AI_FAQ")
-        send_text(phone, "🤖 Ask me any question about Microhub services.\n\nType '0' to go back.")
+        send_text(phone, "🤖 Ask me any question about Microhub services.")
         return
 
     # Show FAQ answer if valid choice
@@ -89,8 +85,7 @@ def handle_faq_menu(phone, text, sender_name, payload, user):
         "3️⃣ How long does approval take?\n"
         "4️⃣ Do you offer SME loans?\n"
         "5️⃣ Can I apply via WhatsApp?\n"
-        "6️⃣ Ask AI a question\n\n"
-        "0️⃣ Back to Main Menu"
+        "6️⃣ Ask me any question\n\n"
     )
 
 
@@ -100,10 +95,6 @@ def handle_faq_menu(phone, text, sender_name, payload, user):
 # ---------------------------
 
 def handle_ai_faq(phone, text, sender_name, payload, user):
-
-    if text == "0":
-        db_manager.update_user(user["id"], "chat_state", "FAQ_MENU")
-        return
 
     answer = ask_microhub_ai(text)
     send_text(phone, answer)
