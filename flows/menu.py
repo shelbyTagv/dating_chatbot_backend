@@ -32,6 +32,3 @@ def handle_main_menu(phone, text, sender_name, payload, user):
         db_manager.update_user(user["id"], "chat_state", "AGENT")
         from flows import agent
         agent.handle_agent(phone, text, sender_name, payload, user)
-    
-    else:
-        send_text(phone, "❌ Invalid option. Please choose 1–4.")
