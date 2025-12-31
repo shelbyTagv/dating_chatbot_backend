@@ -17,7 +17,7 @@ def conn():
         _pool = mysql.connector.pooling.MySQLConnectionPool(
             pool_name="dating_pool",
             pool_size=10,
-            host=os.getenv("MYSQLHOST"),
+            host=os.getenv("MYSQLHOST1"),
             user=os.getenv("MYSQLUSER"),
             password=os.getenv("MYSQLPASSWORD"),
             database=os.getenv("MYSQL_DATABASE"),
