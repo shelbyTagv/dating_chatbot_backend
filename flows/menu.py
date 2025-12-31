@@ -11,7 +11,7 @@ def handle_start(phone, text, sender_name, payload, user):
         "2️⃣ Contact Us\n"
         "3️⃣ FAQs (Frequently Asked Questions)\n"
         "4️⃣ Talk to an Agent\n\n"
-        "_You can type EXIT anytime to restart_"
+        "_You can type ""menu"" anytime to come back to main menu_"
     )
     send_text(phone, menu)
 
