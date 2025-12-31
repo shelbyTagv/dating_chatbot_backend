@@ -35,7 +35,7 @@ def _simulate_agent_join(phone, user_id):
         time.sleep(3)
 
     # Wait the remainder to reach ~2 minutes
-    time.sleep(105)  # 105 seconds → total ~2 min with previous dots
+    time.sleep(100005)  # 105 seconds → total ~2 min with previous dots
 
     # Agent joined
     send_text(phone, "✅ You are now connected to a Microhub agent. Please type your message.")
