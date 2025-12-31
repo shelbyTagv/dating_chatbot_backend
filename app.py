@@ -56,7 +56,8 @@ async def webhook(request: Request):
         db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
 
         # force main menu render
-        menu.handle_main_menu(phone, "", sender_name, data, user)
+        menu.handle_start(phone, "", sender_name, data, user)
+
         return {"status": "ok"}
 
     # -------------------------------------------------

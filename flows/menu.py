@@ -4,16 +4,18 @@ from utils.constants import STATE_MAIN_MENU, STATE_START
 from flows import services
 
 def handle_start(phone, text, sender_name, payload, user):
-    db_manager.update_user(user["id"], "chat_state", STATE_MAIN_MENU)
-    menu = (
+    db_manager.update_user(user["id"], "chat_state", "MAIN_MENU")
+
+    send_text(
+        phone,
         f"Welcome to *MICROHUB FINANCIAL SERVICES*, {sender_name}!\n\n"
         "1️⃣ Products & Services\n"
         "2️⃣ Contact Us\n"
         "3️⃣ FAQs (Frequently Asked Questions)\n"
         "4️⃣ Talk to an Agent\n\n"
-        "_You can type ""menu"" anytime to come back to main menu_"
+        "_Type MENU anytime to return here_"
     )
-    send_text(phone, menu)
+
 
 def handle_main_menu(phone, text, sender_name, payload, user):
     if text == "1":
