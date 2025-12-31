@@ -2,7 +2,7 @@ from fastapi import FastAPI, Request
 from db import db_manager
 from flows import menu, services, faqs, agent, applications, contact
 
-app = FastAPI()
+ap = FastAPI()
 
 STATE_HANDLERS = {
     "START": menu.handle_start,
